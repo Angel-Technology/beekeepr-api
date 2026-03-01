@@ -1,0 +1,8 @@
+<Solution>
+  <Project Path="BuzzKeepr.Application/BuzzKeepr.Application.csproj" />
+  <Project Path="BuzzKeepr.Domain/BuzzKeepr.Domain.csproj" />
+  <Project Path="BuzzKeepr.Infrastructure/BuzzKeepr.Infrastructure.csproj" />
+  <Project Path="BuzzKeepr.IntegrationTests/BuzzKeepr.IntegrationTests.csproj" />
+  <Project Path="BuzzKeepr.Presentation/BuzzKeepr.Presentation.csproj" />
+  <Project Path="BuzzKeepr.UnitTests/BuzzKeepr.UnitTests.csproj" />
+</Solution>
