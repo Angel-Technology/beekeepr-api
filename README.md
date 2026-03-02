@@ -17,6 +17,85 @@ BuzzKeepr.IntegrationTests/
 
 ## Current Status
 
-The repository structure and architecture documentation are in place.
+The solution structure, configuration, Swagger setup, and PostgreSQL container configuration are in place.
 
-The .NET SDK is not installed in this environment yet, so the actual solution and C# projects have not been generated yet.
+## Local Postgres
+
+Start the local development database with Docker:
+
+```bash
+docker compose up -d
+```
+
+Stop it with:
+
+```bash
+docker compose down
+```
+
+The default development connection string is configured for the local container in [appsettings.Development.json](/Users/samuelwemimo/Angel-Technologies/beekeepr-api/BuzzKeepr.Presentation/appsettings.Development.json).
+
+## Database Setup
+
+This project uses PostgreSQL for local development and EF Core migrations for schema management.
+
+### 1. Install the EF Core CLI Tool
+
+```bash
+dotnet tool install --global dotnet-ef
+```
+
+If `dotnet-ef` is not on your `PATH` yet, add it for the current shell session:
+
+```bash
+export PATH="$PATH:/Users/samuelwemimo/.dotnet/tools"
+```
+
+Verify the install:
+
+```bash
+dotnet-ef --version
+```
+
+### 2. Start the Local PostgreSQL Container
+
+```bash
+docker compose up -d
+docker compose ps
+```
+
+This starts the local PostgreSQL instance defined in [compose.yml](/Users/samuelwemimo/Angel-Technologies/beekeepr-api/compose.yml).
+
+### 3. Create the First Migration
+
+```bash
+dotnet ef migrations add InitialCreate --project BuzzKeepr.Infrastructure --startup-project BuzzKeepr.Presentation --context BuzzKeeprDbContext --output-dir Persistence/Migrations
+```
+
+What this command does:
+
+- uses `BuzzKeepr.Infrastructure` as the migrations project
+- uses `BuzzKeepr.Presentation` as the startup project so EF can load app configuration
+- targets the `BuzzKeeprDbContext`
+- writes migration files into `BuzzKeepr.Infrastructure/Persistence/Migrations`
+
+### 4. Apply the Migration to the Database
+
+```bash
+dotnet ef database update --project BuzzKeepr.Infrastructure --startup-project BuzzKeepr.Presentation --context BuzzKeeprDbContext
+```
+
+What this command does:
+
+- creates the target database if needed
+- creates the `__EFMigrationsHistory` table
+- applies any pending migrations to the configured PostgreSQL database
+
+### 5. Build the Solution
+
+```bash
+dotnet restore
+dotnet build
+```
+
+This verifies that the solution, package references, and project wiring are valid before or after running migrations.
