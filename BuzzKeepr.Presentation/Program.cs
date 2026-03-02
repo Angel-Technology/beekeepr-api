@@ -1,31 +1,40 @@
+using BuzzKeepr.Application;
+using BuzzKeepr.Infrastructure;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Register services the app needs before the HTTP pipeline is built.
+// Layer registrations
+builder.Services.AddApplication();
+builder.Services.AddInfrastructure(builder.Configuration);
+
 builder.Services.AddOpenApi();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
 builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 
-// Development-only tooling lives behind the environment check.
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
+    app.UseSwagger();
+    app.UseSwaggerUI();
 }
 
-// A simple root endpoint makes it obvious the API is alive.
 app.MapGet("/", () =>
-{
-    return Results.Ok(new
     {
-        Name = "BuzzKeepr API",
-        Environment = app.Environment.EnvironmentName,
-        OpenApi = app.Environment.IsDevelopment() ? "/openapi/v1.json" : (string?)null,
-        Health = "/health"
-    });
-})
-.WithName("GetRoot");
+        return Results.Ok(new
+        {
+            Name = "BuzzKeepr API",
+            Version = "v1",
+            Environment = app.Environment.EnvironmentName,
+            OpenApi = app.Environment.IsDevelopment() ? "/openapi/v1.json" : null,
+            Swagger = app.Environment.IsDevelopment() ? "/swagger" : null,
+            Health = "/health"
+        });
+    })
+    .WithName("GetRoot");
 
-// Health checks are a standard readiness endpoint for APIs and deployments.
 app.MapHealthChecks("/health");
 
 app.Run();

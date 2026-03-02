@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\BuzzKeepr.Application\BuzzKeepr.Application.csproj" />
     <ProjectReference Include="..\BuzzKeepr.Domain\BuzzKeepr.Domain.csproj" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
   <PropertyGroup>
