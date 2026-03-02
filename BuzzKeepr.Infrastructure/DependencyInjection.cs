@@ -1,14 +1,40 @@
+using BuzzKeepr.Infrastructure.Configuration;
+using BuzzKeepr.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace BuzzKeepr.Infrastructure;
+
 public static class DependencyInjection
 {
     public static IServiceCollection AddInfrastructure(
         this IServiceCollection services,
         IConfiguration configuration)
     {
+        var databaseOptions = configuration
+            .GetSection(DatabaseOptions.SectionName)
+            .Get<DatabaseOptions>() ?? new DatabaseOptions();
+
+        if (string.IsNullOrWhiteSpace(databaseOptions.ConnectionString))
+        {
+            throw new InvalidOperationException(
+                "Database:ConnectionString is required. Set it in appsettings, user secrets, or environment variables.");
+        }
+
+        services.Configure<DatabaseOptions>(
+            configuration.GetSection(DatabaseOptions.SectionName));
+
+        services.AddDbContext<BuzzKeeprDbContext>(options =>
+        {
+            options.UseNpgsql(
+                databaseOptions.ConnectionString,
+                npgsqlOptions =>
+                {
+                    npgsqlOptions.MigrationsAssembly(typeof(BuzzKeeprDbContext).Assembly.FullName);
+                });
+        });
+
         return services;
     }
 }
-

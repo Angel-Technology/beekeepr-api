@@ -166,3 +166,12 @@ Accepted initial architecture:
 - Use Swagger for REST documentation and testing
 - Use Hot Chocolate for GraphQL
 - Treat logging as cross-cutting, not as its own top-level layer
+
+### 2026-03-02
+
+Accepted persistence and API metadata defaults:
+
+- Use PostgreSQL as the primary relational database
+- Use EF Core with `BuzzKeepr.Infrastructure` as the migrations assembly
+- Keep runtime startup in `BuzzKeepr.Presentation`
+- Expose Swagger documentation under the API name `BuzzKeepr.API`
