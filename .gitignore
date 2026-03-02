@@ -1,6 +1,10 @@
 # Build output
 bin/
 obj/
+bin\\
+obj\\
+BuzzKeepr.Infrastructure/bin\\Debug/
+BuzzKeepr.Presentation/bin\\Debug/
 
 # User-specific files
 *.user
@@ -13,4 +17,3 @@ obj/
 
 # OS files
 .DS_Store
-
