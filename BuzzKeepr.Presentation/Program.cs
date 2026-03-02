@@ -1,41 +1,31 @@
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
+// Register services the app needs before the HTTP pipeline is built.
 builder.Services.AddOpenApi();
+builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
+// Development-only tooling lives behind the environment check.
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
 
-app.UseHttpsRedirection();
-
-var summaries = new[]
+// A simple root endpoint makes it obvious the API is alive.
+app.MapGet("/", () =>
 {
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
-
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
+    return Results.Ok(new
+    {
+        Name = "BuzzKeepr API",
+        Environment = app.Environment.EnvironmentName,
+        OpenApi = app.Environment.IsDevelopment() ? "/openapi/v1.json" : (string?)null,
+        Health = "/health"
+    });
 })
-.WithName("GetWeatherForecast");
+.WithName("GetRoot");
+
+// Health checks are a standard readiness endpoint for APIs and deployments.
+app.MapHealthChecks("/health");
 
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
