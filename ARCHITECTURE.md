@@ -152,6 +152,12 @@ Planned API direction:
 - GraphQL queries for current user and session-aware identity reads
 - minimal REST only where third-party callbacks or operational endpoints require it
 
+Current auth mutation set:
+
+- `requestEmailSignIn`
+- `verifyEmailSignIn`
+- `signInWithGoogle`
+
 ## Logging Strategy
 
 Logging is a cross-cutting concern, not a standalone architecture layer.

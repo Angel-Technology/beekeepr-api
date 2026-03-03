@@ -58,6 +58,20 @@ These support the planned flows for:
 - email verification
 - backend-managed session state
 
+## Current GraphQL Auth Mutations
+
+The backend now exposes these auth-oriented GraphQL mutations:
+
+- `requestEmailSignIn`
+- `verifyEmailSignIn`
+- `signInWithGoogle`
+
+Current development behavior:
+
+- `requestEmailSignIn` returns a `developmentToken` so the flow can be tested before an email provider is wired in
+- session tokens are currently returned in mutation payloads
+- later, production auth should move session issuance to secure HTTP-only cookies and send email links through a real provider
+
 ## Local Postgres
 
 Start the local development database with Docker:

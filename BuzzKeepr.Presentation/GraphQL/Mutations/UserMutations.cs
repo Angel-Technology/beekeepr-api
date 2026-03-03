@@ -1,7 +1,11 @@
 using BuzzKeepr.API.GraphQL.Inputs;
 using BuzzKeepr.API.GraphQL.Types;
+using BuzzKeepr.Application.Auth;
 using BuzzKeepr.Application.Users;
+using ApplicationRequestEmailSignInInput = BuzzKeepr.Application.Auth.Models.RequestEmailSignInInput;
+using ApplicationSignInWithGoogleInput = BuzzKeepr.Application.Auth.Models.SignInWithGoogleInput;
 using ApplicationCreateUserInput = BuzzKeepr.Application.Users.Models.CreateUserInput;
+using ApplicationVerifyEmailSignInInput = BuzzKeepr.Application.Auth.Models.VerifyEmailSignInInput;
 
 namespace BuzzKeepr.API.GraphQL.Mutations;
 
@@ -51,6 +55,124 @@ public sealed class UserMutations
                 DisplayName = result.User.DisplayName,
                 EmailVerified = result.User.EmailVerified,
                 CreatedAtUtc = result.User.CreatedAtUtc
+            }
+        };
+    }
+
+    public async Task<RequestEmailSignInPayload> RequestEmailSignInAsync(
+        RequestEmailSignInInput input,
+        [Service] IAuthService authService,
+        CancellationToken cancellationToken)
+    {
+        var result = await authService.RequestEmailSignInAsync(new ApplicationRequestEmailSignInInput
+        {
+            Email = input.Email
+        }, cancellationToken);
+
+        if (result.EmailRequired)
+        {
+            return new RequestEmailSignInPayload
+            {
+                Error = "Email is required."
+            };
+        }
+
+        return new RequestEmailSignInPayload
+        {
+            Success = result.Success,
+            Email = result.Email,
+            ExpiresAtUtc = result.ExpiresAtUtc,
+            DevelopmentToken = result.Token
+        };
+    }
+
+    public async Task<VerifyEmailSignInPayload> VerifyEmailSignInAsync(
+        VerifyEmailSignInInput input,
+        [Service] IAuthService authService,
+        CancellationToken cancellationToken)
+    {
+        var result = await authService.VerifyEmailSignInAsync(new ApplicationVerifyEmailSignInInput
+        {
+            Email = input.Email,
+            Token = input.Token
+        }, cancellationToken);
+
+        if (result.InvalidToken)
+        {
+            return new VerifyEmailSignInPayload
+            {
+                Error = "Invalid or expired token."
+            };
+        }
+
+        if (!result.Success || result.User is null || result.SessionToken is null || !result.ExpiresAtUtc.HasValue)
+        {
+            return new VerifyEmailSignInPayload
+            {
+                Error = "Email sign-in failed."
+            };
+        }
+
+        return new VerifyEmailSignInPayload
+        {
+            User = new UserGraph
+            {
+                Id = result.User.Id,
+                Email = result.User.Email,
+                DisplayName = result.User.DisplayName,
+                EmailVerified = result.User.EmailVerified,
+                CreatedAtUtc = result.User.CreatedAtUtc
+            },
+            Session = new AuthSessionGraph
+            {
+                Token = result.SessionToken,
+                ExpiresAtUtc = result.ExpiresAtUtc.Value
+            }
+        };
+    }
+
+    public async Task<SignInWithGooglePayload> SignInWithGoogleAsync(
+        SignInWithGoogleInput input,
+        [Service] IAuthService authService,
+        CancellationToken cancellationToken)
+    {
+        var result = await authService.SignInWithGoogleAsync(new ApplicationSignInWithGoogleInput
+        {
+            Email = input.Email,
+            ProviderAccountId = input.ProviderAccountId,
+            DisplayName = input.DisplayName
+        }, cancellationToken);
+
+        if (result.InvalidInput)
+        {
+            return new SignInWithGooglePayload
+            {
+                Error = "Email and provider account ID are required."
+            };
+        }
+
+        if (!result.Success || result.User is null || result.SessionToken is null || !result.ExpiresAtUtc.HasValue)
+        {
+            return new SignInWithGooglePayload
+            {
+                Error = "Google sign-in failed."
+            };
+        }
+
+        return new SignInWithGooglePayload
+        {
+            User = new UserGraph
+            {
+                Id = result.User.Id,
+                Email = result.User.Email,
+                DisplayName = result.User.DisplayName,
+                EmailVerified = result.User.EmailVerified,
+                CreatedAtUtc = result.User.CreatedAtUtc
+            },
+            Session = new AuthSessionGraph
+            {
+                Token = result.SessionToken,
+                ExpiresAtUtc = result.ExpiresAtUtc.Value
             }
         };
     }
