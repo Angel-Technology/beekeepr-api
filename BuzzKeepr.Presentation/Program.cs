@@ -1,3 +1,4 @@
+using BuzzKeepr.API.Endpoints;
 using BuzzKeepr.Application;
 using BuzzKeepr.Infrastructure;
 using Microsoft.OpenApi;
@@ -47,5 +48,6 @@ app.MapGet("/", () =>
     .WithName("GetRoot");
 
 app.MapHealthChecks("/health");
+app.MapUserEndpoints();
 
 app.Run();

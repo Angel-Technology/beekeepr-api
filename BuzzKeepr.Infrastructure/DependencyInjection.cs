@@ -1,5 +1,6 @@
 using BuzzKeepr.Infrastructure.Configuration;
 using BuzzKeepr.Infrastructure.Persistence;
+using BuzzKeepr.Infrastructure.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -34,6 +35,8 @@ public static class DependencyInjection
                     npgsqlOptions.MigrationsAssembly(typeof(BuzzKeeprDbContext).Assembly.FullName);
                 });
         });
+
+        services.AddScoped<Application.Users.IUserRepository, UserRepository>();
 
         return services;
     }
