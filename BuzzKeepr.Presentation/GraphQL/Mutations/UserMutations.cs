@@ -1,5 +1,7 @@
+using BuzzKeepr.API.GraphQL.Inputs;
+using BuzzKeepr.API.GraphQL.Types;
 using BuzzKeepr.Application.Users;
-using BuzzKeepr.Application.Users.Models;
+using ApplicationCreateUserInput = BuzzKeepr.Application.Users.Models.CreateUserInput;
 
 namespace BuzzKeepr.API.GraphQL.Mutations;
 
@@ -10,7 +12,11 @@ public sealed class UserMutations
         [Service] IUserService userService,
         CancellationToken cancellationToken)
     {
-        var result = await userService.CreateAsync(input, cancellationToken);
+        var result = await userService.CreateAsync(new ApplicationCreateUserInput
+        {
+            Email = input.Email,
+            DisplayName = input.DisplayName
+        }, cancellationToken);
 
         if (result.EmailRequired)
         {
@@ -38,7 +44,14 @@ public sealed class UserMutations
 
         return new CreateUserPayload
         {
-            User = result.User
+            User = new UserGraph
+            {
+                Id = result.User.Id,
+                Email = result.User.Email,
+                DisplayName = result.User.DisplayName,
+                EmailVerified = result.User.EmailVerified,
+                CreatedAtUtc = result.User.CreatedAtUtc
+            }
         };
     }
 }

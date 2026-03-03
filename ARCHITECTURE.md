@@ -139,11 +139,12 @@ Current auth target:
 - email sign-in
 - passwordless email verification
 
-Planned persistence concepts:
+Current persistence concepts:
 
 - `Users` as the canonical internal identity
 - `ExternalAccounts` for provider links such as Google
-- future session and verification-token tables for sign-in state and email verification
+- `Sessions` for session lifecycle and cookie-backed auth state
+- `VerificationTokens` for passwordless email sign-in and email verification
 
 Planned API direction:
 
@@ -210,3 +211,10 @@ Accepted API and auth direction:
 - Keep GraphQL resolvers thin and route all business behavior through `Application`
 - Model auth around internal users plus external provider accounts
 - Target Google sign-in and passwordless email verification as the first auth flows
+
+Accepted auth persistence shape:
+
+- Add `Sessions` for backend-managed auth state
+- Add `VerificationTokens` for passwordless sign-in and email verification
+- Keep GraphQL-specific input and payload models in `Presentation`
+- Keep application use-case input and output models in `Application`

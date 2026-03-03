@@ -1,14 +1,25 @@
 using BuzzKeepr.Application.Users;
-using BuzzKeepr.Application.Users.Models;
+using BuzzKeepr.API.GraphQL.Types;
 
 namespace BuzzKeepr.API.GraphQL.Queries;
 
 public sealed class UserQueries
 {
-    public Task<UserDto?> GetUserByIdAsync(Guid id,
+    public async Task<UserGraph?> GetUserByIdAsync(Guid id,
         [Service] IUserService userService,
         CancellationToken cancellationToken)
     {
-        return userService.GetByIdAsync(id, cancellationToken);
+        var user = await userService.GetByIdAsync(id, cancellationToken);
+
+        return user is null
+            ? null
+            : new UserGraph
+            {
+                Id = user.Id,
+                Email = user.Email,
+                DisplayName = user.DisplayName,
+                EmailVerified = user.EmailVerified,
+                CreatedAtUtc = user.CreatedAtUtc
+            };
     }
 }

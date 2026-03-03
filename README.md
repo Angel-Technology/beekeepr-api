@@ -39,7 +39,24 @@ The database is being shaped around:
 
 - `Users` as the internal identity record
 - `ExternalAccounts` for linked providers like Google
-- future session and verification-token tables
+- `Sessions` for session lifecycle
+- `VerificationTokens` for passwordless email sign-in and email verification
+
+## Current Auth Schema
+
+The auth-related tables currently modeled in the backend are:
+
+- `Users`
+- `ExternalAccounts`
+- `Sessions`
+- `VerificationTokens`
+
+These support the planned flows for:
+
+- Google sign-in
+- passwordless email sign-in
+- email verification
+- backend-managed session state
 
 ## Local Postgres
 
@@ -121,3 +138,10 @@ dotnet build
 ```
 
 This verifies that the solution, package references, and project wiring are valid before or after running migrations.
+
+If you change the auth entities or `BuzzKeeprDbContext`, generate a new migration and apply it again:
+
+```bash
+dotnet ef migrations add <MigrationName> --project BuzzKeepr.Infrastructure --startup-project BuzzKeepr.Presentation --context BuzzKeeprDbContext --output-dir Persistence/Migrations
+dotnet ef database update --project BuzzKeepr.Infrastructure --startup-project BuzzKeepr.Presentation --context BuzzKeeprDbContext
+```
