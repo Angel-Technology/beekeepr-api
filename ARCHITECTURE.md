@@ -28,11 +28,10 @@ Owns delivery concerns.
 
 Responsibilities:
 - ASP.NET Core startup and host configuration
-- REST endpoints
 - GraphQL endpoint via Hot Chocolate
 - Swagger/OpenAPI
 - Authentication and authorization middleware
-- Request/response contracts specific to the API surface
+- transport-specific GraphQL types and endpoint wiring
 
 Must not:
 - Contain database access logic
@@ -113,15 +112,44 @@ YAML is not the default application runtime configuration format for this backen
 
 ## API Strategy
 
-The backend will expose both REST and GraphQL:
+The backend is GraphQL-first.
 
-- REST for straightforward resource operations and external tooling compatibility
-- GraphQL for frontend-specific querying flexibility
+Primary API surface:
+
+- GraphQL for frontend data access and auth flows
+
+Secondary API surface:
+
+- minimal REST endpoints only for operational concerns such as health checks or future webhook callbacks
 
 Tools:
 
 - Swagger/OpenAPI for REST exploration and testing
 - Hot Chocolate for GraphQL server support
+
+GraphQL resolvers in `Presentation` must call `Application` services. They must not access EF Core or repositories directly.
+
+## Auth Direction
+
+The backend is being designed to support frontend auth flows similar to Better Auth requirements, with backend-owned persistence.
+
+Current auth target:
+
+- Google sign-in
+- email sign-in
+- passwordless email verification
+
+Planned persistence concepts:
+
+- `Users` as the canonical internal identity
+- `ExternalAccounts` for provider links such as Google
+- future session and verification-token tables for sign-in state and email verification
+
+Planned API direction:
+
+- GraphQL mutations for sign-in and account linkage
+- GraphQL queries for current user and session-aware identity reads
+- minimal REST only where third-party callbacks or operational endpoints require it
 
 ## Logging Strategy
 
@@ -175,3 +203,10 @@ Accepted persistence and API metadata defaults:
 - Use EF Core with `BuzzKeepr.Infrastructure` as the migrations assembly
 - Keep runtime startup in `BuzzKeepr.Presentation`
 - Expose Swagger documentation under the API name `BuzzKeepr.API`
+
+Accepted API and auth direction:
+
+- Prefer GraphQL over REST for product-facing frontend APIs
+- Keep GraphQL resolvers thin and route all business behavior through `Application`
+- Model auth around internal users plus external provider accounts
+- Target Google sign-in and passwordless email verification as the first auth flows

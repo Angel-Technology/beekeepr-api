@@ -17,7 +17,29 @@ BuzzKeepr.IntegrationTests/
 
 ## Current Status
 
-The solution structure, configuration, Swagger setup, and PostgreSQL container configuration are in place.
+The solution structure, PostgreSQL container configuration, GraphQL endpoint, and Swagger setup are in place.
+
+## API Direction
+
+This backend is GraphQL-first for product-facing frontend features.
+
+- GraphQL endpoint: `/graphql`
+- Swagger is kept for operational REST endpoints and debugging
+- Business logic should be reused through `Application` services, regardless of transport
+
+## Auth Direction
+
+The current auth design target is:
+
+- Google sign-in
+- email sign-in
+- passwordless email verification
+
+The database is being shaped around:
+
+- `Users` as the internal identity record
+- `ExternalAccounts` for linked providers like Google
+- future session and verification-token tables
 
 ## Local Postgres
 
