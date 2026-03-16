@@ -68,9 +68,43 @@ The backend now exposes these auth-oriented GraphQL mutations:
 
 Current development behavior:
 
-- `requestEmailSignIn` returns a `developmentToken` so the flow can be tested before an email provider is wired in
-- session tokens are currently returned in mutation payloads
-- later, production auth should move session issuance to secure HTTP-only cookies and send email links through a real provider
+- `requestEmailSignIn` uses Resend when `Email:ResendApiKey` is configured
+- if `Email:ResendApiKey` is empty, the backend falls back to a development sender that logs the 5-digit sign-in code on the backend
+- sign-in mutations now issue a session cookie instead of returning the session token in GraphQL payloads
+- `currentUser` should be read through the cookie-backed session
+- later, production auth should keep HTTP-only cookies and replace the development sender with a real email provider
+
+## Auth Access Model
+
+Public mutations:
+
+- `requestEmailSignIn`
+- `verifyEmailSignIn`
+- `signInWithGoogle`
+
+Cookie-backed identity reads:
+
+- `currentUser`
+
+This is intentional. A user must be able to start sign-in without already being authenticated. The protected part is reading or acting as an authenticated user after a valid session cookie has been issued.
+
+## Email Provider
+
+The backend is wired for Resend as the first email provider.
+
+Relevant config lives under the `Email` section:
+
+- `FromEmail`
+- `FrontendBaseUrl`
+- `ResendApiKey`
+- `ResendBaseUrl`
+
+In development:
+
+- leave `ResendApiKey` empty to log the 5-digit sign-in code on the backend
+- set `ResendApiKey` to send real emails through Resend
+
+The current email flow sends a 5-digit code that the frontend submits back to `verifyEmailSignIn`.
 
 ## Local Postgres
 

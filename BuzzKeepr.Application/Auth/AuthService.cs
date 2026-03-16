@@ -7,8 +7,42 @@ using BuzzKeepr.Domain.Enums;
 
 namespace BuzzKeepr.Application.Auth;
 
-public sealed class AuthService(IAuthRepository authRepository) : IAuthService
+public sealed class AuthService(IAuthRepository authRepository, IEmailSignInSender emailSignInSender) : IAuthService
 {
+    private const int MaxVerificationAttempts = 5;
+
+    public async Task<CurrentUserResult> GetCurrentUserAsync(string? sessionToken, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sessionToken))
+            return new CurrentUserResult();
+
+        var user = await authRepository.GetUserBySessionTokenHashAsync(
+            HashToken(sessionToken),
+            DateTime.UtcNow,
+            cancellationToken);
+
+        return new CurrentUserResult
+        {
+            User = user is null ? null : MapUser(user)
+        };
+    }
+
+    public async Task<SignOutResult> SignOutAsync(string? sessionToken, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sessionToken))
+            return new SignOutResult
+            {
+                Success = true
+            };
+
+        await authRepository.RevokeSessionAsync(HashToken(sessionToken), DateTime.UtcNow, cancellationToken);
+
+        return new SignOutResult
+        {
+            Success = true
+        };
+    }
+
     public async Task<RequestEmailSignInResult> RequestEmailSignInAsync(
         RequestEmailSignInInput input,
         CancellationToken cancellationToken)
@@ -22,7 +56,7 @@ public sealed class AuthService(IAuthRepository authRepository) : IAuthService
             };
 
         var existingUser = await authRepository.GetUserByEmailAsync(normalizedEmail, cancellationToken);
-        var rawToken = CreateOpaqueToken();
+        var rawCode = CreateFiveDigitCode();
 
         var verificationToken = new VerificationToken
         {
@@ -30,19 +64,24 @@ public sealed class AuthService(IAuthRepository authRepository) : IAuthService
             UserId = existingUser?.Id,
             Email = normalizedEmail,
             Purpose = VerificationTokenPurpose.EmailSignIn,
-            TokenHash = HashToken(rawToken),
+            TokenHash = HashToken(rawCode),
+            FailedAttempts = 0,
             CreatedAtUtc = DateTime.UtcNow,
             ExpiresAtUtc = DateTime.UtcNow.AddMinutes(15)
         };
 
         await authRepository.AddVerificationTokenAsync(verificationToken, cancellationToken);
+        await emailSignInSender.SendSignInCodeAsync(
+            normalizedEmail,
+            rawCode,
+            verificationToken.ExpiresAtUtc,
+            cancellationToken);
 
         return new RequestEmailSignInResult
         {
             Success = true,
             Email = normalizedEmail,
-            ExpiresAtUtc = verificationToken.ExpiresAtUtc,
-            Token = rawToken
+            ExpiresAtUtc = verificationToken.ExpiresAtUtc
         };
     }
 
@@ -52,19 +91,17 @@ public sealed class AuthService(IAuthRepository authRepository) : IAuthService
     {
         var normalizedEmail = NormalizeEmail(input.Email);
 
-        if (string.IsNullOrWhiteSpace(normalizedEmail) || string.IsNullOrWhiteSpace(input.Token))
+        if (string.IsNullOrWhiteSpace(normalizedEmail) || string.IsNullOrWhiteSpace(input.Code))
             return new VerifyEmailSignInResult
             {
                 InvalidToken = true
             };
 
-        var tokenHash = HashToken(input.Token);
         var nowUtc = DateTime.UtcNow;
 
         var verificationToken = await authRepository.GetValidVerificationTokenAsync(
             normalizedEmail,
             VerificationTokenPurpose.EmailSignIn,
-            tokenHash,
             nowUtc,
             cancellationToken);
 
@@ -73,6 +110,17 @@ public sealed class AuthService(IAuthRepository authRepository) : IAuthService
             {
                 InvalidToken = true
             };
+
+        if (!string.Equals(verificationToken.TokenHash, HashToken(input.Code), StringComparison.Ordinal))
+        {
+            if (verificationToken.FailedAttempts < MaxVerificationAttempts)
+                await authRepository.IncrementVerificationTokenFailedAttemptsAsync(verificationToken.Id, cancellationToken);
+
+            return new VerifyEmailSignInResult
+            {
+                InvalidToken = true
+            };
+        }
 
         var user = await authRepository.GetUserByEmailAsync(normalizedEmail, cancellationToken);
 
@@ -209,6 +257,12 @@ public sealed class AuthService(IAuthRepository authRepository) : IAuthService
     private static string CreateOpaqueToken()
     {
         return Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+    }
+
+    private static string CreateFiveDigitCode()
+    {
+        var value = RandomNumberGenerator.GetInt32(0, 100000);
+        return value.ToString("D5");
     }
 
     private static string HashToken(string rawToken)

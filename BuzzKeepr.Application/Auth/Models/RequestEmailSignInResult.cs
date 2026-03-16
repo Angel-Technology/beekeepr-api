@@ -9,6 +9,4 @@ public sealed class RequestEmailSignInResult
     public string Email { get; init; } = string.Empty;
 
     public DateTime? ExpiresAtUtc { get; init; }
-
-    public string? Token { get; init; }
 }

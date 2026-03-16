@@ -14,6 +14,29 @@ public sealed class AuthRepository(BuzzKeeprDbContext dbContext) : IAuthReposito
             .FirstOrDefaultAsync(user => user.Email == email, cancellationToken);
     }
 
+    public async Task<User?> GetUserBySessionTokenHashAsync(string tokenHash, DateTime nowUtc, CancellationToken cancellationToken)
+    {
+        return await dbContext.Sessions
+            .AsNoTracking()
+            .Where(session => session.TokenHash == tokenHash
+                && session.RevokedAtUtc == null
+                && session.ExpiresAtUtc > nowUtc)
+            .Select(session => session.User)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    public async Task RevokeSessionAsync(string tokenHash, DateTime revokedAtUtc, CancellationToken cancellationToken)
+    {
+        var session = await dbContext.Sessions
+            .FirstOrDefaultAsync(session => session.TokenHash == tokenHash && session.RevokedAtUtc == null, cancellationToken);
+
+        if (session is null)
+            return;
+
+        session.RevokedAtUtc = revokedAtUtc;
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<ExternalAccount?> GetExternalAccountAsync(
         AuthProvider provider,
         string providerAccountId,
@@ -29,7 +52,6 @@ public sealed class AuthRepository(BuzzKeeprDbContext dbContext) : IAuthReposito
     public async Task<VerificationToken?> GetValidVerificationTokenAsync(
         string email,
         VerificationTokenPurpose purpose,
-        string tokenHash,
         DateTime nowUtc,
         CancellationToken cancellationToken)
     {
@@ -38,10 +60,22 @@ public sealed class AuthRepository(BuzzKeeprDbContext dbContext) : IAuthReposito
             .FirstOrDefaultAsync(
                 token => token.Email == email
                     && token.Purpose == purpose
-                    && token.TokenHash == tokenHash
                     && token.ConsumedAtUtc == null
-                    && token.ExpiresAtUtc > nowUtc,
+                    && token.ExpiresAtUtc > nowUtc
+                    && token.FailedAttempts < 5,
                 cancellationToken);
+    }
+
+    public async Task IncrementVerificationTokenFailedAttemptsAsync(Guid verificationTokenId, CancellationToken cancellationToken)
+    {
+        var token = await dbContext.VerificationTokens
+            .FirstOrDefaultAsync(currentToken => currentToken.Id == verificationTokenId, cancellationToken);
+
+        if (token is null)
+            return;
+
+        token.FailedAttempts += 1;
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     public async Task AddVerificationTokenAsync(VerificationToken verificationToken, CancellationToken cancellationToken)

@@ -8,7 +8,5 @@ public sealed class RequestEmailSignInPayload
 
     public DateTime? ExpiresAtUtc { get; init; }
 
-    public string? DevelopmentToken { get; init; }
-
     public string? Error { get; init; }
 }

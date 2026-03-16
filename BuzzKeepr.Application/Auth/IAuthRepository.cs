@@ -7,15 +7,20 @@ public interface IAuthRepository
 {
     Task<User?> GetUserByEmailAsync(string email, CancellationToken cancellationToken);
 
+    Task<User?> GetUserBySessionTokenHashAsync(string tokenHash, DateTime nowUtc, CancellationToken cancellationToken);
+
+    Task RevokeSessionAsync(string tokenHash, DateTime revokedAtUtc, CancellationToken cancellationToken);
+
     Task<ExternalAccount?> GetExternalAccountAsync(AuthProvider provider, string providerAccountId,
         CancellationToken cancellationToken);
 
     Task<VerificationToken?> GetValidVerificationTokenAsync(
         string email,
         VerificationTokenPurpose purpose,
-        string tokenHash,
         DateTime nowUtc,
         CancellationToken cancellationToken);
+
+    Task IncrementVerificationTokenFailedAttemptsAsync(Guid verificationTokenId, CancellationToken cancellationToken);
 
     Task AddVerificationTokenAsync(VerificationToken verificationToken, CancellationToken cancellationToken);
 

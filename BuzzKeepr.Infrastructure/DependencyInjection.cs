@@ -1,3 +1,4 @@
+using BuzzKeepr.Infrastructure.Auth;
 using BuzzKeepr.Infrastructure.Configuration;
 using BuzzKeepr.Infrastructure.Persistence;
 using BuzzKeepr.Infrastructure.Persistence.Repositories;
@@ -25,6 +26,8 @@ public static class DependencyInjection
 
         services.Configure<DatabaseOptions>(
             configuration.GetSection(DatabaseOptions.SectionName));
+        services.Configure<EmailDeliveryOptions>(
+            configuration.GetSection(EmailDeliveryOptions.SectionName));
 
         services.AddDbContext<BuzzKeeprDbContext>(options =>
         {
@@ -36,6 +39,18 @@ public static class DependencyInjection
                 });
         });
 
+        services.AddHttpClient<ResendEmailSignInSender>();
+        services.AddScoped<DevelopmentEmailSignInSender>();
+        services.AddScoped<Application.Auth.IEmailSignInSender>(serviceProvider =>
+        {
+            var emailOptions = configuration
+                .GetSection(EmailDeliveryOptions.SectionName)
+                .Get<EmailDeliveryOptions>() ?? new EmailDeliveryOptions();
+
+            return string.IsNullOrWhiteSpace(emailOptions.ResendApiKey)
+                ? serviceProvider.GetRequiredService<DevelopmentEmailSignInSender>()
+                : serviceProvider.GetRequiredService<ResendEmailSignInSender>();
+        });
         services.AddScoped<Application.Auth.IAuthRepository, AuthRepository>();
         services.AddScoped<Application.Users.IUserRepository, UserRepository>();
 

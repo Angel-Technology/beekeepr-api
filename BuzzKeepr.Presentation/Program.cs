@@ -9,6 +9,7 @@ var builder = WebApplication.CreateBuilder(args);
 // Layer registrations
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddHttpContextAccessor();
 
 builder.Services
     .AddGraphQLServer()

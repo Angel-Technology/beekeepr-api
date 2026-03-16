@@ -158,6 +158,13 @@ Current auth mutation set:
 - `verifyEmailSignIn`
 - `signInWithGoogle`
 
+Current session access model:
+
+- sign-in mutations are public
+- authenticated identity is resolved from the backend-managed session cookie
+- frontend GraphQL queries such as `currentUser` should rely on that cookie-backed session state
+- email sign-in delivery uses Resend when configured and a development logger fallback otherwise
+
 ## Logging Strategy
 
 Logging is a cross-cutting concern, not a standalone architecture layer.

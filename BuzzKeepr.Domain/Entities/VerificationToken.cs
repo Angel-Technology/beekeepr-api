@@ -14,6 +14,8 @@ public sealed class VerificationToken
 
     public string TokenHash { get; set; } = string.Empty;
 
+    public int FailedAttempts { get; set; }
+
     public DateTime ExpiresAtUtc { get; set; }
 
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;

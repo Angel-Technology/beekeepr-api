@@ -1,3 +1,5 @@
+using BuzzKeepr.API.Auth;
+using BuzzKeepr.Application.Auth;
 using BuzzKeepr.Application.Users;
 using BuzzKeepr.API.GraphQL.Types;
 
@@ -20,6 +22,30 @@ public sealed class UserQueries
                 DisplayName = user.DisplayName,
                 EmailVerified = user.EmailVerified,
                 CreatedAtUtc = user.CreatedAtUtc
+            };
+    }
+
+    public async Task<UserGraph?> GetCurrentUserAsync(
+        [Service] IAuthService authService,
+        [Service] IHttpContextAccessor httpContextAccessor,
+        CancellationToken cancellationToken)
+    {
+        var httpContext = httpContextAccessor.HttpContext
+            ?? throw new InvalidOperationException("HTTP context is required for session lookup.");
+
+        var result = await authService.GetCurrentUserAsync(
+            SessionCookieManager.ReadSessionCookie(httpContext),
+            cancellationToken);
+
+        return result.User is null
+            ? null
+            : new UserGraph
+            {
+                Id = result.User.Id,
+                Email = result.User.Email,
+                DisplayName = result.User.DisplayName,
+                EmailVerified = result.User.EmailVerified,
+                CreatedAtUtc = result.User.CreatedAtUtc
             };
     }
 }

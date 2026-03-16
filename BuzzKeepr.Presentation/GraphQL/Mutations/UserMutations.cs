@@ -1,3 +1,4 @@
+using BuzzKeepr.API.Auth;
 using BuzzKeepr.API.GraphQL.Inputs;
 using BuzzKeepr.API.GraphQL.Types;
 using BuzzKeepr.Application.Auth;
@@ -81,20 +82,20 @@ public sealed class UserMutations
         {
             Success = result.Success,
             Email = result.Email,
-            ExpiresAtUtc = result.ExpiresAtUtc,
-            DevelopmentToken = result.Token
+            ExpiresAtUtc = result.ExpiresAtUtc
         };
     }
 
     public async Task<VerifyEmailSignInPayload> VerifyEmailSignInAsync(
         VerifyEmailSignInInput input,
         [Service] IAuthService authService,
+        [Service] IHttpContextAccessor httpContextAccessor,
         CancellationToken cancellationToken)
     {
         var result = await authService.VerifyEmailSignInAsync(new ApplicationVerifyEmailSignInInput
         {
             Email = input.Email,
-            Token = input.Token
+            Code = input.Code
         }, cancellationToken);
 
         if (result.InvalidToken)
@@ -113,6 +114,11 @@ public sealed class UserMutations
             };
         }
 
+        var httpContext = httpContextAccessor.HttpContext
+            ?? throw new InvalidOperationException("HTTP context is required for session cookie issuance.");
+
+        SessionCookieManager.WriteSessionCookie(httpContext, result.SessionToken, result.ExpiresAtUtc.Value);
+
         return new VerifyEmailSignInPayload
         {
             User = new UserGraph
@@ -122,11 +128,6 @@ public sealed class UserMutations
                 DisplayName = result.User.DisplayName,
                 EmailVerified = result.User.EmailVerified,
                 CreatedAtUtc = result.User.CreatedAtUtc
-            },
-            Session = new AuthSessionGraph
-            {
-                Token = result.SessionToken,
-                ExpiresAtUtc = result.ExpiresAtUtc.Value
             }
         };
     }
@@ -134,6 +135,7 @@ public sealed class UserMutations
     public async Task<SignInWithGooglePayload> SignInWithGoogleAsync(
         SignInWithGoogleInput input,
         [Service] IAuthService authService,
+        [Service] IHttpContextAccessor httpContextAccessor,
         CancellationToken cancellationToken)
     {
         var result = await authService.SignInWithGoogleAsync(new ApplicationSignInWithGoogleInput
@@ -159,6 +161,11 @@ public sealed class UserMutations
             };
         }
 
+        var httpContext = httpContextAccessor.HttpContext
+            ?? throw new InvalidOperationException("HTTP context is required for session cookie issuance.");
+
+        SessionCookieManager.WriteSessionCookie(httpContext, result.SessionToken, result.ExpiresAtUtc.Value);
+
         return new SignInWithGooglePayload
         {
             User = new UserGraph
@@ -168,12 +175,27 @@ public sealed class UserMutations
                 DisplayName = result.User.DisplayName,
                 EmailVerified = result.User.EmailVerified,
                 CreatedAtUtc = result.User.CreatedAtUtc
-            },
-            Session = new AuthSessionGraph
-            {
-                Token = result.SessionToken,
-                ExpiresAtUtc = result.ExpiresAtUtc.Value
             }
+        };
+    }
+
+    public async Task<SignOutPayload> SignOutAsync(
+        [Service] IAuthService authService,
+        [Service] IHttpContextAccessor httpContextAccessor,
+        CancellationToken cancellationToken)
+    {
+        var httpContext = httpContextAccessor.HttpContext
+            ?? throw new InvalidOperationException("HTTP context is required for sign out.");
+
+        await authService.SignOutAsync(
+            SessionCookieManager.ReadSessionCookie(httpContext),
+            cancellationToken);
+
+        SessionCookieManager.ClearSessionCookie(httpContext);
+
+        return new SignOutPayload
+        {
+            Success = true
         };
     }
 }

@@ -94,6 +94,10 @@ public sealed class BuzzKeeprDbContext(DbContextOptions<BuzzKeeprDbContext> opti
                 .HasMaxLength(128)
                 .IsRequired();
 
+            builder.Property(token => token.FailedAttempts)
+                .HasDefaultValue(0)
+                .IsRequired();
+
             builder.HasOne(token => token.User)
                 .WithMany(user => user.VerificationTokens)
                 .HasForeignKey(token => token.UserId)
