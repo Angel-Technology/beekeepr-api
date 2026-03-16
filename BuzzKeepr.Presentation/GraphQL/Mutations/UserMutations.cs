@@ -78,6 +78,14 @@ public sealed class UserMutations
             };
         }
 
+        if (result.EmailDeliveryFailed)
+        {
+            return new RequestEmailSignInPayload
+            {
+                Error = "Email delivery failed. Check Resend configuration and sender verification."
+            };
+        }
+
         return new RequestEmailSignInPayload
         {
             Success = result.Success,

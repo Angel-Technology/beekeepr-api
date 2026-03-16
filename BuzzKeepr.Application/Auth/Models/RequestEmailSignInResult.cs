@@ -6,6 +6,8 @@ public sealed class RequestEmailSignInResult
 
     public bool EmailRequired { get; init; }
 
+    public bool EmailDeliveryFailed { get; init; }
+
     public string Email { get; init; } = string.Empty;
 
     public DateTime? ExpiresAtUtc { get; init; }

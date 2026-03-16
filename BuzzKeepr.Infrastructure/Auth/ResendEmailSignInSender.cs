@@ -35,6 +35,11 @@ public sealed class ResendEmailSignInSender(
             "application/json");
 
         using var response = await httpClient.SendAsync(request, cancellationToken);
-        response.EnsureSuccessStatusCode();
+        if (response.IsSuccessStatusCode)
+            return;
+
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        throw new InvalidOperationException(
+            $"Resend email request failed with status {(int)response.StatusCode}: {body}");
     }
 }

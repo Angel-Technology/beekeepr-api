@@ -5,11 +5,44 @@ using BuzzKeepr.Infrastructure;
 using Microsoft.OpenApi;
 
 var builder = WebApplication.CreateBuilder(args);
+var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
+var isDevelopment = builder.Environment.IsDevelopment();
 
 // Layer registrations
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("Frontend", policy =>
+    {
+        if (isDevelopment)
+        {
+            policy
+                .SetIsOriginAllowed(origin =>
+                {
+                    if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+                        return false;
+
+                    return uri.Host is "localhost" or "127.0.0.1";
+                })
+                .AllowAnyHeader()
+                .AllowAnyMethod()
+                .AllowCredentials();
+
+            return;
+        }
+
+        if (allowedOrigins.Length == 0)
+            return;
+
+        policy
+            .WithOrigins(allowedOrigins)
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
+    });
+});
 
 builder.Services
     .AddGraphQLServer()
@@ -39,6 +72,8 @@ if (app.Environment.IsDevelopment())
         options.SwaggerEndpoint("/swagger/v1/swagger.json", "v1");
     });
 }
+
+app.UseCors("Frontend");
 
 app.MapGet("/", () =>
     {

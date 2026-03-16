@@ -20,6 +20,11 @@ public interface IAuthRepository
         DateTime nowUtc,
         CancellationToken cancellationToken);
 
+    Task<VerificationToken?> GetLatestUnconsumedVerificationTokenAsync(
+        string email,
+        VerificationTokenPurpose purpose,
+        CancellationToken cancellationToken);
+
     Task IncrementVerificationTokenFailedAttemptsAsync(Guid verificationTokenId, CancellationToken cancellationToken);
 
     Task AddVerificationTokenAsync(VerificationToken verificationToken, CancellationToken cancellationToken);

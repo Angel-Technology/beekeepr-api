@@ -57,6 +57,7 @@ public sealed class AuthRepository(BuzzKeeprDbContext dbContext) : IAuthReposito
     {
         return await dbContext.VerificationTokens
             .Include(token => token.User)
+            .OrderByDescending(token => token.CreatedAtUtc)
             .FirstOrDefaultAsync(
                 token => token.Email == email
                     && token.Purpose == purpose
@@ -64,6 +65,19 @@ public sealed class AuthRepository(BuzzKeeprDbContext dbContext) : IAuthReposito
                     && token.ExpiresAtUtc > nowUtc
                     && token.FailedAttempts < 5,
                 cancellationToken);
+    }
+
+    public async Task<VerificationToken?> GetLatestUnconsumedVerificationTokenAsync(
+        string email,
+        VerificationTokenPurpose purpose,
+        CancellationToken cancellationToken)
+    {
+        return await dbContext.VerificationTokens
+            .Where(token => token.Email == email
+                            && token.Purpose == purpose
+                            && token.ConsumedAtUtc == null)
+            .OrderByDescending(token => token.CreatedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
     }
 
     public async Task IncrementVerificationTokenFailedAttemptsAsync(Guid verificationTokenId, CancellationToken cancellationToken)

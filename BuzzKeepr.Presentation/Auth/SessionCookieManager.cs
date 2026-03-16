@@ -8,11 +8,13 @@ public static class SessionCookieManager
 
     public static void WriteSessionCookie(HttpContext httpContext, string sessionToken, DateTime expiresAtUtc)
     {
+        var isHttps = httpContext.Request.IsHttps;
+
         httpContext.Response.Cookies.Append(SessionCookieName, sessionToken, new CookieOptions
         {
             HttpOnly = true,
-            Secure = false,
-            SameSite = SameSiteMode.Lax,
+            Secure = isHttps,
+            SameSite = isHttps ? SameSiteMode.None : SameSiteMode.Lax,
             Expires = new DateTimeOffset(expiresAtUtc)
         });
     }

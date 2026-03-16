@@ -57,25 +57,47 @@ public sealed class AuthService(IAuthRepository authRepository, IEmailSignInSend
 
         var existingUser = await authRepository.GetUserByEmailAsync(normalizedEmail, cancellationToken);
         var rawCode = CreateFiveDigitCode();
+        var nowUtc = DateTime.UtcNow;
+        var existingVerificationToken = await authRepository.GetLatestUnconsumedVerificationTokenAsync(
+            normalizedEmail,
+            VerificationTokenPurpose.EmailSignIn,
+            cancellationToken);
 
-        var verificationToken = new VerificationToken
+        var verificationToken = existingVerificationToken ?? new VerificationToken
         {
             Id = Guid.NewGuid(),
             UserId = existingUser?.Id,
             Email = normalizedEmail,
-            Purpose = VerificationTokenPurpose.EmailSignIn,
-            TokenHash = HashToken(rawCode),
-            FailedAttempts = 0,
-            CreatedAtUtc = DateTime.UtcNow,
-            ExpiresAtUtc = DateTime.UtcNow.AddMinutes(15)
+            Purpose = VerificationTokenPurpose.EmailSignIn
         };
 
-        await authRepository.AddVerificationTokenAsync(verificationToken, cancellationToken);
-        await emailSignInSender.SendSignInCodeAsync(
-            normalizedEmail,
-            rawCode,
-            verificationToken.ExpiresAtUtc,
-            cancellationToken);
+        verificationToken.TokenHash = HashToken(rawCode);
+        verificationToken.FailedAttempts = 0;
+        verificationToken.CreatedAtUtc = nowUtc;
+        verificationToken.ExpiresAtUtc = nowUtc.AddMinutes(15);
+        verificationToken.ConsumedAtUtc = null;
+        verificationToken.UserId ??= existingUser?.Id;
+
+        try
+        {
+            await emailSignInSender.SendSignInCodeAsync(
+                normalizedEmail,
+                rawCode,
+                verificationToken.ExpiresAtUtc,
+                cancellationToken);
+        }
+        catch
+        {
+            return new RequestEmailSignInResult
+            {
+                EmailDeliveryFailed = true
+            };
+        }
+
+        if (existingVerificationToken is null)
+            await authRepository.AddVerificationTokenAsync(verificationToken, cancellationToken);
+        else
+            await authRepository.SaveChangesAsync(cancellationToken);
 
         return new RequestEmailSignInResult
         {

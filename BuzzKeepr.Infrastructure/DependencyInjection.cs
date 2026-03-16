@@ -29,6 +29,16 @@ public static class DependencyInjection
         services.Configure<EmailDeliveryOptions>(
             configuration.GetSection(EmailDeliveryOptions.SectionName));
 
+        var emailOptions = configuration
+            .GetSection(EmailDeliveryOptions.SectionName)
+            .Get<EmailDeliveryOptions>() ?? new EmailDeliveryOptions();
+
+        if (string.IsNullOrWhiteSpace(emailOptions.ResendApiKey))
+        {
+            throw new InvalidOperationException(
+                "Email:ResendApiKey is required. Set it in user secrets or environment variables.");
+        }
+
         services.AddDbContext<BuzzKeeprDbContext>(options =>
         {
             options.UseNpgsql(
@@ -40,17 +50,7 @@ public static class DependencyInjection
         });
 
         services.AddHttpClient<ResendEmailSignInSender>();
-        services.AddScoped<DevelopmentEmailSignInSender>();
-        services.AddScoped<Application.Auth.IEmailSignInSender>(serviceProvider =>
-        {
-            var emailOptions = configuration
-                .GetSection(EmailDeliveryOptions.SectionName)
-                .Get<EmailDeliveryOptions>() ?? new EmailDeliveryOptions();
-
-            return string.IsNullOrWhiteSpace(emailOptions.ResendApiKey)
-                ? serviceProvider.GetRequiredService<DevelopmentEmailSignInSender>()
-                : serviceProvider.GetRequiredService<ResendEmailSignInSender>();
-        });
+        services.AddScoped<Application.Auth.IEmailSignInSender, ResendEmailSignInSender>();
         services.AddScoped<Application.Auth.IAuthRepository, AuthRepository>();
         services.AddScoped<Application.Users.IUserRepository, UserRepository>();
 

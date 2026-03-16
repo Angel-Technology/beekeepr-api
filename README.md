@@ -68,11 +68,10 @@ The backend now exposes these auth-oriented GraphQL mutations:
 
 Current development behavior:
 
-- `requestEmailSignIn` uses Resend when `Email:ResendApiKey` is configured
-- if `Email:ResendApiKey` is empty, the backend falls back to a development sender that logs the 5-digit sign-in code on the backend
+- `requestEmailSignIn` uses Resend for code delivery
 - sign-in mutations now issue a session cookie instead of returning the session token in GraphQL payloads
 - `currentUser` should be read through the cookie-backed session
-- later, production auth should keep HTTP-only cookies and replace the development sender with a real email provider
+- production auth should keep HTTP-only cookies and secure cookie settings
 
 ## Auth Access Model
 
@@ -101,8 +100,7 @@ Relevant config lives under the `Email` section:
 
 In development:
 
-- leave `ResendApiKey` empty to log the 5-digit sign-in code on the backend
-- set `ResendApiKey` to send real emails through Resend
+- set `ResendApiKey` to send real emails through Resend (required at startup)
 
 The current email flow sends a 5-digit code that the frontend submits back to `verifyEmailSignIn`.
 
@@ -121,6 +119,30 @@ docker compose down
 ```
 
 The default development connection string is configured for the local container in [appsettings.Development.json](/Users/samuelwemimo/Angel-Technologies/beekeepr-api/BuzzKeepr.Presentation/appsettings.Development.json).
+
+## Frontend Local Integration Checklist
+
+1. Ensure your frontend origin is in [appsettings.Development.json](/Users/samuelwemimo/Angel-Technologies/beekeepr-api/BuzzKeepr.Presentation/appsettings.Development.json) under `Cors:AllowedOrigins` (default: `http://localhost:3000`).
+2. Apply all pending migrations.
+3. Run the API and use `/graphql` from the frontend with credentials included.
+
+For frontend GraphQL calls, include credentials so the `buzzkeepr_session` cookie is sent:
+
+```ts
+fetch("http://localhost:5158/graphql", {
+  method: "POST",
+  credentials: "include",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ query, variables })
+});
+```
+
+Recommended auth smoke test order:
+
+- `requestEmailSignIn`
+- `verifyEmailSignIn`
+- `currentUser`
+- `signOut`
 
 ## Database Setup
 
