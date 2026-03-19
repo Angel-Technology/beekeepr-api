@@ -34,7 +34,7 @@ public sealed class UserQueries
             ?? throw new InvalidOperationException("HTTP context is required for session lookup.");
 
         var result = await authService.GetCurrentUserAsync(
-            SessionCookieManager.ReadSessionCookie(httpContext),
+            SessionTokenResolver.Resolve(httpContext),
             cancellationToken);
 
         return result.User is null

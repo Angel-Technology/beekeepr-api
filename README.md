@@ -66,6 +66,8 @@ The backend now exposes these auth-oriented GraphQL mutations:
 - `verifyEmailSignIn`
 - `signInWithGoogle`
 
+`signInWithGoogle` now expects a Google ID token from the client. The backend verifies that token against configured Google OAuth client IDs before creating or linking a user.
+
 Current development behavior:
 
 - `requestEmailSignIn` uses Resend for code delivery
@@ -98,6 +100,10 @@ Relevant config lives under the `Email` section:
 - `ResendApiKey`
 - `ResendBaseUrl`
 
+Google sign-in config lives under the `Google` section:
+
+- `ClientIds`
+
 In development:
 
 - set `ResendApiKey` to send real emails through Resend (required at startup)
@@ -126,7 +132,7 @@ The default development connection string is configured for the local container 
 2. Apply all pending migrations.
 3. Run the API and use `/graphql` from the frontend with credentials included.
 
-For frontend GraphQL calls, include credentials so the `buzzkeepr_session` cookie is sent:
+For browser-based GraphQL calls, include credentials so the `buzzkeepr_session` cookie is sent:
 
 ```ts
 fetch("http://localhost:5158/graphql", {
@@ -137,12 +143,68 @@ fetch("http://localhost:5158/graphql", {
 });
 ```
 
+For Expo native clients, prefer bearer auth instead of relying on cookies. After sign-in, store the returned session token securely and send it on future requests:
+
+```ts
+fetch("http://YOUR_LAN_IP:5158/graphql", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "Authorization": `Bearer ${sessionToken}`
+  },
+  body: JSON.stringify({ query, variables })
+});
+```
+
 Recommended auth smoke test order:
 
 - `requestEmailSignIn`
 - `verifyEmailSignIn`
 - `currentUser`
 - `signOut`
+
+For Expo Google sign-in, obtain a Google ID token on device and send it to GraphQL:
+
+```graphql
+mutation SignInWithGoogle($input: SignInWithGoogleInput!) {
+  signInWithGoogle(input: $input) {
+    user {
+      id
+      email
+      displayName
+    }
+    error
+  }
+}
+```
+
+Example variables:
+
+```json
+{
+  "input": {
+    "idToken": "google-id-token-from-expo"
+  }
+}
+```
+
+Successful auth mutations return both the authenticated `user` and a `session` object:
+
+```graphql
+mutation VerifyEmailSignIn($input: VerifyEmailSignInInput!) {
+  verifyEmailSignIn(input: $input) {
+    user {
+      id
+      email
+    }
+    session {
+      token
+      expiresAtUtc
+    }
+    error
+  }
+}
+```
 
 ## Database Setup
 

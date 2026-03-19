@@ -136,6 +136,11 @@ public sealed class UserMutations
                 DisplayName = result.User.DisplayName,
                 EmailVerified = result.User.EmailVerified,
                 CreatedAtUtc = result.User.CreatedAtUtc
+            },
+            Session = new AuthSessionGraph
+            {
+                Token = result.SessionToken,
+                ExpiresAtUtc = result.ExpiresAtUtc.Value
             }
         };
     }
@@ -148,16 +153,22 @@ public sealed class UserMutations
     {
         var result = await authService.SignInWithGoogleAsync(new ApplicationSignInWithGoogleInput
         {
-            Email = input.Email,
-            ProviderAccountId = input.ProviderAccountId,
-            DisplayName = input.DisplayName
+            IdToken = input.IdToken
         }, cancellationToken);
 
         if (result.InvalidInput)
         {
             return new SignInWithGooglePayload
             {
-                Error = "Email and provider account ID are required."
+                Error = "Google ID token is required."
+            };
+        }
+
+        if (result.InvalidToken)
+        {
+            return new SignInWithGooglePayload
+            {
+                Error = "Invalid Google ID token."
             };
         }
 
@@ -183,6 +194,11 @@ public sealed class UserMutations
                 DisplayName = result.User.DisplayName,
                 EmailVerified = result.User.EmailVerified,
                 CreatedAtUtc = result.User.CreatedAtUtc
+            },
+            Session = new AuthSessionGraph
+            {
+                Token = result.SessionToken,
+                ExpiresAtUtc = result.ExpiresAtUtc.Value
             }
         };
     }
@@ -196,7 +212,7 @@ public sealed class UserMutations
             ?? throw new InvalidOperationException("HTTP context is required for sign out.");
 
         await authService.SignOutAsync(
-            SessionCookieManager.ReadSessionCookie(httpContext),
+            SessionTokenResolver.Resolve(httpContext),
             cancellationToken);
 
         SessionCookieManager.ClearSessionCookie(httpContext);

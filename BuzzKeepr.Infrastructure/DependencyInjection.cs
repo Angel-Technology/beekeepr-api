@@ -28,6 +28,8 @@ public static class DependencyInjection
             configuration.GetSection(DatabaseOptions.SectionName));
         services.Configure<EmailDeliveryOptions>(
             configuration.GetSection(EmailDeliveryOptions.SectionName));
+        services.Configure<GoogleAuthOptions>(
+            configuration.GetSection(GoogleAuthOptions.SectionName));
 
         var emailOptions = configuration
             .GetSection(EmailDeliveryOptions.SectionName)
@@ -50,6 +52,7 @@ public static class DependencyInjection
         });
 
         services.AddHttpClient<ResendEmailSignInSender>();
+        services.AddScoped<Application.Auth.IGoogleTokenVerifier, GoogleTokenVerifier>();
         services.AddScoped<Application.Auth.IEmailSignInSender, ResendEmailSignInSender>();
         services.AddScoped<Application.Auth.IAuthRepository, AuthRepository>();
         services.AddScoped<Application.Users.IUserRepository, UserRepository>();

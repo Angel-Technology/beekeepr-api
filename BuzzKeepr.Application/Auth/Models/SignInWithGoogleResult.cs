@@ -8,6 +8,8 @@ public sealed class SignInWithGoogleResult
 
     public bool InvalidInput { get; init; }
 
+    public bool InvalidToken { get; init; }
+
     public UserDto? User { get; init; }
 
     public string? SessionToken { get; init; }

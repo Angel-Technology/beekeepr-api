@@ -158,6 +158,10 @@ Current auth mutation set:
 - `verifyEmailSignIn`
 - `signInWithGoogle`
 
+Google sign-in should not trust raw identity fields from the client. The backend verifies a Google-issued ID token and only then creates or links the internal user/session records.
+
+For native clients such as Expo, the backend should expose the application session token in auth mutation payloads so the client can store it securely and send it back as a bearer token on subsequent requests. Cookie-backed sessions can still be kept for browser clients.
+
 Current session access model:
 
 - sign-in mutations are public

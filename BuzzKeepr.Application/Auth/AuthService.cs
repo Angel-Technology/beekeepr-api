@@ -7,7 +7,10 @@ using BuzzKeepr.Domain.Enums;
 
 namespace BuzzKeepr.Application.Auth;
 
-public sealed class AuthService(IAuthRepository authRepository, IEmailSignInSender emailSignInSender) : IAuthService
+public sealed class AuthService(
+    IAuthRepository authRepository,
+    IEmailSignInSender emailSignInSender,
+    IGoogleTokenVerifier googleTokenVerifier) : IAuthService
 {
     private const int MaxVerificationAttempts = 5;
 
@@ -192,18 +195,25 @@ public sealed class AuthService(IAuthRepository authRepository, IEmailSignInSend
         SignInWithGoogleInput input,
         CancellationToken cancellationToken)
     {
-        var normalizedEmail = NormalizeEmail(input.Email);
-
-        if (string.IsNullOrWhiteSpace(normalizedEmail) || string.IsNullOrWhiteSpace(input.ProviderAccountId))
+        if (string.IsNullOrWhiteSpace(input.IdToken))
             return new SignInWithGoogleResult
             {
                 InvalidInput = true
             };
 
+        var identity = await googleTokenVerifier.VerifyIdTokenAsync(input.IdToken, cancellationToken);
+
+        if (identity is null)
+            return new SignInWithGoogleResult
+            {
+                InvalidToken = true
+            };
+
+        var normalizedEmail = NormalizeEmail(identity.Email);
         var nowUtc = DateTime.UtcNow;
         var externalAccount = await authRepository.GetExternalAccountAsync(
             AuthProvider.Google,
-            input.ProviderAccountId,
+            identity.ProviderAccountId,
             cancellationToken);
 
         User user;
@@ -223,13 +233,13 @@ public sealed class AuthService(IAuthRepository authRepository, IEmailSignInSend
             {
                 Id = Guid.NewGuid(),
                 Email = normalizedEmail,
-                DisplayName = string.IsNullOrWhiteSpace(input.DisplayName) ? null : input.DisplayName.Trim(),
+                DisplayName = string.IsNullOrWhiteSpace(identity.DisplayName) ? null : identity.DisplayName.Trim(),
                 EmailVerified = true,
                 CreatedAtUtc = nowUtc
             };
 
             user.EmailVerified = true;
-            user.DisplayName ??= string.IsNullOrWhiteSpace(input.DisplayName) ? null : input.DisplayName.Trim();
+            user.DisplayName ??= string.IsNullOrWhiteSpace(identity.DisplayName) ? null : identity.DisplayName.Trim();
 
             if (isNewUser) await authRepository.AddUserAsync(user, cancellationToken);
 
@@ -238,7 +248,7 @@ public sealed class AuthService(IAuthRepository authRepository, IEmailSignInSend
                 Id = Guid.NewGuid(),
                 UserId = user.Id,
                 Provider = AuthProvider.Google,
-                ProviderAccountId = input.ProviderAccountId,
+                ProviderAccountId = identity.ProviderAccountId,
                 ProviderEmail = normalizedEmail,
                 CreatedAtUtc = nowUtc,
                 LastSignInAtUtc = nowUtc,
