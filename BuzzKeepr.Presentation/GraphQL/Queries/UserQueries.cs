@@ -21,6 +21,9 @@ public sealed class UserQueries
                 Email = user.Email,
                 DisplayName = user.DisplayName,
                 EmailVerified = user.EmailVerified,
+                IdentityVerificationStatus = user.IdentityVerificationStatus,
+                PersonaInquiryId = user.PersonaInquiryId,
+                PersonaInquiryStatus = user.PersonaInquiryStatus,
                 CreatedAtUtc = user.CreatedAtUtc
             };
     }
@@ -45,6 +48,9 @@ public sealed class UserQueries
                 Email = result.User.Email,
                 DisplayName = result.User.DisplayName,
                 EmailVerified = result.User.EmailVerified,
+                IdentityVerificationStatus = result.User.IdentityVerificationStatus,
+                PersonaInquiryId = result.User.PersonaInquiryId,
+                PersonaInquiryStatus = result.User.PersonaInquiryStatus,
                 CreatedAtUtc = result.User.CreatedAtUtc
             };
     }

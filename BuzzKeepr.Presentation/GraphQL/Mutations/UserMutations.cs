@@ -2,6 +2,7 @@ using BuzzKeepr.API.Auth;
 using BuzzKeepr.API.GraphQL.Inputs;
 using BuzzKeepr.API.GraphQL.Types;
 using BuzzKeepr.Application.Auth;
+using BuzzKeepr.Application.IdentityVerification;
 using BuzzKeepr.Application.Users;
 using ApplicationRequestEmailSignInInput = BuzzKeepr.Application.Auth.Models.RequestEmailSignInInput;
 using ApplicationSignInWithGoogleInput = BuzzKeepr.Application.Auth.Models.SignInWithGoogleInput;
@@ -55,6 +56,9 @@ public sealed class UserMutations
                 Email = result.User.Email,
                 DisplayName = result.User.DisplayName,
                 EmailVerified = result.User.EmailVerified,
+                IdentityVerificationStatus = result.User.IdentityVerificationStatus,
+                PersonaInquiryId = result.User.PersonaInquiryId,
+                PersonaInquiryStatus = result.User.PersonaInquiryStatus,
                 CreatedAtUtc = result.User.CreatedAtUtc
             }
         };
@@ -135,6 +139,9 @@ public sealed class UserMutations
                 Email = result.User.Email,
                 DisplayName = result.User.DisplayName,
                 EmailVerified = result.User.EmailVerified,
+                IdentityVerificationStatus = result.User.IdentityVerificationStatus,
+                PersonaInquiryId = result.User.PersonaInquiryId,
+                PersonaInquiryStatus = result.User.PersonaInquiryStatus,
                 CreatedAtUtc = result.User.CreatedAtUtc
             },
             Session = new AuthSessionGraph
@@ -193,6 +200,9 @@ public sealed class UserMutations
                 Email = result.User.Email,
                 DisplayName = result.User.DisplayName,
                 EmailVerified = result.User.EmailVerified,
+                IdentityVerificationStatus = result.User.IdentityVerificationStatus,
+                PersonaInquiryId = result.User.PersonaInquiryId,
+                PersonaInquiryStatus = result.User.PersonaInquiryStatus,
                 CreatedAtUtc = result.User.CreatedAtUtc
             },
             Session = new AuthSessionGraph
@@ -220,6 +230,42 @@ public sealed class UserMutations
         return new SignOutPayload
         {
             Success = true
+        };
+    }
+
+    public async Task<StartPersonaInquiryPayload> StartPersonaInquiryAsync(
+        [Service] IAuthService authService,
+        [Service] IIdentityVerificationService identityVerificationService,
+        [Service] IHttpContextAccessor httpContextAccessor,
+        CancellationToken cancellationToken)
+    {
+        var httpContext = httpContextAccessor.HttpContext
+            ?? throw new InvalidOperationException("HTTP context is required for Persona inquiry creation.");
+
+        var currentUser = await authService.GetCurrentUserAsync(
+            SessionTokenResolver.Resolve(httpContext),
+            cancellationToken);
+
+        if (currentUser.User is null)
+        {
+            return new StartPersonaInquiryPayload
+            {
+                Error = "Authentication is required."
+            };
+        }
+
+        var result = await identityVerificationService.StartPersonaInquiryAsync(
+            currentUser.User.Id,
+            cancellationToken);
+
+        return new StartPersonaInquiryPayload
+        {
+            Success = result.Success,
+            CreatedNewInquiry = result.CreatedNewInquiry,
+            InquiryId = result.InquiryId,
+            IdentityVerificationStatus = result.IdentityVerificationStatus,
+            PersonaInquiryStatus = result.PersonaInquiryStatus,
+            Error = result.Error
         };
     }
 }

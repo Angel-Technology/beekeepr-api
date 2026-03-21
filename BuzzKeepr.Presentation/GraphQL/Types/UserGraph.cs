@@ -10,5 +10,11 @@ public sealed class UserGraph
 
     public bool EmailVerified { get; init; }
 
+    public string IdentityVerificationStatus { get; init; } = "not_started";
+
+    public string? PersonaInquiryId { get; init; }
+
+    public string? PersonaInquiryStatus { get; init; }
+
     public DateTime CreatedAtUtc { get; init; }
 }
