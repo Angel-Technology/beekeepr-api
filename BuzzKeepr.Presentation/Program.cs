@@ -54,6 +54,10 @@ builder.Services.AddCors(options =>
 
 builder.Services
     .AddGraphQLServer()
+    .ModifyRequestOptions(options =>
+    {
+        options.IncludeExceptionDetails = isDevelopment;
+    })
     .AddQueryType<UserQueries>()
     .AddMutationType<UserMutations>();
 

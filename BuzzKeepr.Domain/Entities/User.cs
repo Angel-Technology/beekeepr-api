@@ -16,7 +16,7 @@ public sealed class User
 
     public string? PersonaInquiryId { get; set; }
 
-    public string? PersonaInquiryStatus { get; set; }
+    public PersonaInquiryStatus? PersonaInquiryStatus { get; set; }
 
     public string? VerifiedFirstName { get; set; }
 

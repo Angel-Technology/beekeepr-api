@@ -1,12 +1,14 @@
 using System.Text.Json;
 using BuzzKeepr.Application.IdentityVerification.Models;
 using BuzzKeepr.Domain.Enums;
+using Microsoft.Extensions.Logging;
 
 namespace BuzzKeepr.Application.IdentityVerification;
 
 public sealed class IdentityVerificationService(
     IIdentityVerificationRepository identityVerificationRepository,
-    IPersonaClient personaClient) : IIdentityVerificationService
+    IPersonaClient personaClient,
+    ILogger<IdentityVerificationService> logger) : IIdentityVerificationService
 {
     private static readonly HashSet<IdentityVerificationStatus> RetryableStatuses =
     [
@@ -17,10 +19,13 @@ public sealed class IdentityVerificationService(
 
     public async Task<StartPersonaInquiryResult> StartPersonaInquiryAsync(Guid userId, CancellationToken cancellationToken)
     {
+        logger.LogInformation("Starting Persona inquiry for user {UserId}.", userId);
+
         var user = await identityVerificationRepository.GetByIdAsync(userId, cancellationToken);
 
         if (user is null)
         {
+            logger.LogWarning("Persona inquiry requested for missing user {UserId}.", userId);
             return new StartPersonaInquiryResult
             {
                 Error = "Authenticated user was not found."
@@ -28,17 +33,23 @@ public sealed class IdentityVerificationService(
         }
 
         var shouldCreateNewInquiry = string.IsNullOrWhiteSpace(user.PersonaInquiryId)
-            || string.IsNullOrWhiteSpace(user.PersonaInquiryStatus)
+            || user.PersonaInquiryStatus is null
             || RetryableStatuses.Contains(user.IdentityVerificationStatus);
 
         if (!shouldCreateNewInquiry)
         {
+            logger.LogInformation(
+                "Reusing Persona inquiry {InquiryId} for user {UserId} with status {PersonaInquiryStatus}.",
+                user.PersonaInquiryId,
+                user.Id,
+                user.PersonaInquiryStatus);
+
             return new StartPersonaInquiryResult
             {
                 Success = true,
                 CreatedNewInquiry = false,
                 InquiryId = user.PersonaInquiryId,
-                IdentityVerificationStatus = ToApiStatus(user.IdentityVerificationStatus),
+                IdentityVerificationStatus = user.IdentityVerificationStatus,
                 PersonaInquiryStatus = user.PersonaInquiryStatus
             };
         }
@@ -56,27 +67,38 @@ public sealed class IdentityVerificationService(
             || string.IsNullOrWhiteSpace(createInquiryResult.InquiryId)
             || string.IsNullOrWhiteSpace(createInquiryResult.InquiryStatus))
         {
+            logger.LogWarning(
+                "Persona inquiry creation failed for user {UserId}. Error: {Error}",
+                user.Id,
+                createInquiryResult.Error);
+
             return new StartPersonaInquiryResult
             {
                 Error = createInquiryResult.Error ?? "Persona inquiry creation failed.",
-                IdentityVerificationStatus = ToApiStatus(user.IdentityVerificationStatus),
+                IdentityVerificationStatus = user.IdentityVerificationStatus,
                 PersonaInquiryStatus = user.PersonaInquiryStatus
             };
         }
 
-        var inquiryStatus = createInquiryResult.InquiryStatus.Trim().ToLowerInvariant();
+        var inquiryStatus = MapPersonaInquiryStatus(createInquiryResult.InquiryStatus);
         user.PersonaInquiryId = createInquiryResult.InquiryId;
         user.PersonaInquiryStatus = inquiryStatus;
-        user.IdentityVerificationStatus = MapInquiryStatus(inquiryStatus);
+        user.IdentityVerificationStatus = MapIdentityVerificationStatus(inquiryStatus);
 
         await identityVerificationRepository.SaveChangesAsync(cancellationToken);
+
+        logger.LogInformation(
+            "Created Persona inquiry {InquiryId} for user {UserId} with status {PersonaInquiryStatus}.",
+            user.PersonaInquiryId,
+            user.Id,
+            user.PersonaInquiryStatus);
 
         return new StartPersonaInquiryResult
         {
             Success = true,
             CreatedNewInquiry = true,
             InquiryId = user.PersonaInquiryId,
-            IdentityVerificationStatus = ToApiStatus(user.IdentityVerificationStatus),
+            IdentityVerificationStatus = user.IdentityVerificationStatus,
             PersonaInquiryStatus = user.PersonaInquiryStatus
         };
     }
@@ -86,15 +108,21 @@ public sealed class IdentityVerificationService(
         using var document = JsonDocument.Parse(rawRequestBody);
 
         if (!TryExtractInquiryPayload(document.RootElement, out var inquiryId, out var inquiryStatus))
+        {
+            logger.LogWarning("Persona webhook payload did not contain an inquiry id and status.");
             return;
+        }
 
         var user = await identityVerificationRepository.GetByPersonaInquiryIdAsync(inquiryId, cancellationToken);
 
         if (user is null)
+        {
+            logger.LogWarning("Persona webhook received for unknown inquiry {InquiryId}.", inquiryId);
             return;
+        }
 
         user.PersonaInquiryStatus = inquiryStatus;
-        user.IdentityVerificationStatus = MapInquiryStatus(inquiryStatus);
+        user.IdentityVerificationStatus = MapIdentityVerificationStatus(inquiryStatus);
 
         if (user.IdentityVerificationStatus is IdentityVerificationStatus.Approved
             or IdentityVerificationStatus.Completed)
@@ -119,15 +147,21 @@ public sealed class IdentityVerificationService(
         }
 
         await identityVerificationRepository.SaveChangesAsync(cancellationToken);
+
+        logger.LogInformation(
+            "Processed Persona webhook for inquiry {InquiryId}. User {UserId} now has identity status {IdentityVerificationStatus}.",
+            inquiryId,
+            user.Id,
+            user.IdentityVerificationStatus);
     }
 
     private static bool TryExtractInquiryPayload(
         JsonElement root,
         out string inquiryId,
-        out string inquiryStatus)
+        out PersonaInquiryStatus inquiryStatus)
     {
         inquiryId = string.Empty;
-        inquiryStatus = string.Empty;
+        inquiryStatus = default;
 
         if (!root.TryGetProperty("data", out var eventData)
             || !eventData.TryGetProperty("attributes", out var eventAttributes)
@@ -151,41 +185,44 @@ public sealed class IdentityVerificationService(
         }
 
         inquiryId = inquiryIdElement.GetString()?.Trim() ?? string.Empty;
-        inquiryStatus = inquiryStatusElement.GetString()?.Trim().ToLowerInvariant() ?? string.Empty;
+        var rawInquiryStatus = inquiryStatusElement.GetString()?.Trim();
 
-        return !string.IsNullOrWhiteSpace(inquiryId) && !string.IsNullOrWhiteSpace(inquiryStatus);
+        if (string.IsNullOrWhiteSpace(inquiryId) || string.IsNullOrWhiteSpace(rawInquiryStatus))
+            return false;
+
+        inquiryStatus = MapPersonaInquiryStatus(rawInquiryStatus);
+        return true;
     }
 
-    private static IdentityVerificationStatus MapInquiryStatus(string inquiryStatus)
+    private static PersonaInquiryStatus MapPersonaInquiryStatus(string inquiryStatus)
     {
-        return inquiryStatus switch
+        return inquiryStatus.Trim().ToLowerInvariant() switch
         {
-            "created" => IdentityVerificationStatus.Created,
-            "pending" => IdentityVerificationStatus.Pending,
-            "completed" => IdentityVerificationStatus.Completed,
-            "needs-review" => IdentityVerificationStatus.NeedsReview,
-            "approved" => IdentityVerificationStatus.Approved,
-            "declined" => IdentityVerificationStatus.Declined,
-            "failed" => IdentityVerificationStatus.Failed,
-            "expired" => IdentityVerificationStatus.Expired,
-            _ => IdentityVerificationStatus.Pending
+            "created" => PersonaInquiryStatus.Created,
+            "pending" => PersonaInquiryStatus.Pending,
+            "completed" => PersonaInquiryStatus.Completed,
+            "needs-review" => PersonaInquiryStatus.NeedsReview,
+            "approved" => PersonaInquiryStatus.Approved,
+            "declined" => PersonaInquiryStatus.Declined,
+            "failed" => PersonaInquiryStatus.Failed,
+            "expired" => PersonaInquiryStatus.Expired,
+            _ => PersonaInquiryStatus.Pending
         };
     }
 
-    public static string ToApiStatus(IdentityVerificationStatus status)
+    private static IdentityVerificationStatus MapIdentityVerificationStatus(PersonaInquiryStatus status)
     {
         return status switch
         {
-            IdentityVerificationStatus.NotStarted => "not_started",
-            IdentityVerificationStatus.Created => "created",
-            IdentityVerificationStatus.Pending => "pending",
-            IdentityVerificationStatus.Completed => "completed",
-            IdentityVerificationStatus.NeedsReview => "needs_review",
-            IdentityVerificationStatus.Approved => "approved",
-            IdentityVerificationStatus.Declined => "declined",
-            IdentityVerificationStatus.Failed => "failed",
-            IdentityVerificationStatus.Expired => "expired",
-            _ => "pending"
+            PersonaInquiryStatus.Created => IdentityVerificationStatus.Created,
+            PersonaInquiryStatus.Pending => IdentityVerificationStatus.Pending,
+            PersonaInquiryStatus.Completed => IdentityVerificationStatus.Completed,
+            PersonaInquiryStatus.NeedsReview => IdentityVerificationStatus.NeedsReview,
+            PersonaInquiryStatus.Approved => IdentityVerificationStatus.Approved,
+            PersonaInquiryStatus.Declined => IdentityVerificationStatus.Declined,
+            PersonaInquiryStatus.Failed => IdentityVerificationStatus.Failed,
+            PersonaInquiryStatus.Expired => IdentityVerificationStatus.Expired,
+            _ => IdentityVerificationStatus.Pending
         };
     }
 }

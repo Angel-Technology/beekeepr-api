@@ -312,7 +312,7 @@ public sealed class AuthService(
             Email = user.Email,
             DisplayName = user.DisplayName,
             EmailVerified = user.EmailVerified,
-            IdentityVerificationStatus = IdentityVerificationService.ToApiStatus(user.IdentityVerificationStatus),
+            IdentityVerificationStatus = user.IdentityVerificationStatus,
             PersonaInquiryId = user.PersonaInquiryId,
             PersonaInquiryStatus = user.PersonaInquiryStatus,
             CreatedAtUtc = user.CreatedAtUtc

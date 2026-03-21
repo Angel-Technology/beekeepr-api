@@ -1,3 +1,5 @@
+using BuzzKeepr.Domain.Enums;
+
 namespace BuzzKeepr.API.GraphQL.Mutations;
 
 public sealed class StartPersonaInquiryPayload
@@ -8,9 +10,9 @@ public sealed class StartPersonaInquiryPayload
 
     public string? InquiryId { get; init; }
 
-    public string? IdentityVerificationStatus { get; init; }
+    public IdentityVerificationStatus? IdentityVerificationStatus { get; init; }
 
-    public string? PersonaInquiryStatus { get; init; }
+    public PersonaInquiryStatus? PersonaInquiryStatus { get; init; }
 
     public string? Error { get; init; }
 }

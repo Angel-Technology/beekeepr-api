@@ -35,6 +35,7 @@ public sealed class BuzzKeeprDbContext(DbContextOptions<BuzzKeeprDbContext> opti
                 .HasMaxLength(100);
 
             builder.Property(user => user.PersonaInquiryStatus)
+                .HasConversion<string>()
                 .HasMaxLength(50);
 
             builder.Property(user => user.VerifiedFirstName)

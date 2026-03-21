@@ -1,5 +1,5 @@
-using BuzzKeepr.Application.Users.Models;
 using BuzzKeepr.Application.IdentityVerification;
+using BuzzKeepr.Application.Users.Models;
 using BuzzKeepr.Domain.Entities;
 
 namespace BuzzKeepr.Application.Users;
@@ -61,7 +61,7 @@ public sealed class UserService(IUserRepository userRepository) : IUserService
             Email = user.Email,
             DisplayName = user.DisplayName,
             EmailVerified = user.EmailVerified,
-            IdentityVerificationStatus = IdentityVerificationService.ToApiStatus(user.IdentityVerificationStatus),
+            IdentityVerificationStatus = user.IdentityVerificationStatus,
             PersonaInquiryId = user.PersonaInquiryId,
             PersonaInquiryStatus = user.PersonaInquiryStatus,
             CreatedAtUtc = user.CreatedAtUtc

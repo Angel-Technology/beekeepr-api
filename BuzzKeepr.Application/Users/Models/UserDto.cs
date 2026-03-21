@@ -1,3 +1,5 @@
+using BuzzKeepr.Domain.Enums;
+
 namespace BuzzKeepr.Application.Users.Models;
 
 public sealed class UserDto
@@ -10,11 +12,11 @@ public sealed class UserDto
 
     public bool EmailVerified { get; init; }
 
-    public string IdentityVerificationStatus { get; init; } = "not_started";
+    public IdentityVerificationStatus IdentityVerificationStatus { get; init; } = IdentityVerificationStatus.NotStarted;
 
     public string? PersonaInquiryId { get; init; }
 
-    public string? PersonaInquiryStatus { get; init; }
+    public PersonaInquiryStatus? PersonaInquiryStatus { get; init; }
 
     public DateTime CreatedAtUtc { get; init; }
 }

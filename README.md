@@ -320,7 +320,7 @@ The webhook is signature-checked against the `Persona-Signature` header, then up
 
 1. Sign in.
 2. Query `currentUser`.
-3. If `identityVerificationStatus != "approved"`, call `startPersonaInquiry`.
+3. If `identityVerificationStatus != APPROVED`, call `startPersonaInquiry`.
 4. Launch the Persona SDK with the returned `inquiryId`.
 5. Refresh `currentUser` after Persona flow completion and on app resume.
 

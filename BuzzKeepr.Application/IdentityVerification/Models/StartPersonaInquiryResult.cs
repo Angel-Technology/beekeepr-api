@@ -1,3 +1,5 @@
+using BuzzKeepr.Domain.Enums;
+
 namespace BuzzKeepr.Application.IdentityVerification.Models;
 
 public sealed class StartPersonaInquiryResult
@@ -8,9 +10,9 @@ public sealed class StartPersonaInquiryResult
 
     public string? InquiryId { get; init; }
 
-    public string IdentityVerificationStatus { get; init; } = "not_started";
+    public IdentityVerificationStatus IdentityVerificationStatus { get; init; } = IdentityVerificationStatus.NotStarted;
 
-    public string? PersonaInquiryStatus { get; init; }
+    public PersonaInquiryStatus? PersonaInquiryStatus { get; init; }
 
     public string? Error { get; init; }
 }

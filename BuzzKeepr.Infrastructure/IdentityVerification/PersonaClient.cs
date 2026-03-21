@@ -4,16 +4,20 @@ using System.Text.Json;
 using BuzzKeepr.Application.IdentityVerification;
 using BuzzKeepr.Application.IdentityVerification.Models;
 using BuzzKeepr.Infrastructure.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace BuzzKeepr.Infrastructure.IdentityVerification;
 
 public sealed class PersonaClient(
     HttpClient httpClient,
-    IOptions<PersonaOptions> personaOptions) : IPersonaClient
+    IOptions<PersonaOptions> personaOptions,
+    ILogger<PersonaClient> logger) : IPersonaClient
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
+    private static readonly Uri DefaultApiBaseUri = new("https://api.withpersona.com");
     private readonly PersonaOptions options = personaOptions.Value;
+    private readonly Uri apiBaseUri = CreateApiBaseUri(personaOptions.Value.ApiBaseUrl, logger);
 
     public async Task<CreatePersonaInquiryResult> CreateInquiryAsync(
         CreatePersonaInquiryInput input,
@@ -51,43 +55,69 @@ public sealed class PersonaClient(
             }
         };
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/inquiries");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
-        request.Content = new StringContent(
-            JsonSerializer.Serialize(requestBody, SerializerOptions),
-            Encoding.UTF8,
-            "application/json");
-
-        using var response = await httpClient.SendAsync(request, cancellationToken);
-        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-
-        if (!response.IsSuccessStatusCode)
+        try
         {
+            using var request = new HttpRequestMessage(HttpMethod.Post, BuildUri("/api/v1/inquiries"));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
+            request.Content = new StringContent(
+                JsonSerializer.Serialize(requestBody, SerializerOptions),
+                Encoding.UTF8,
+                "application/json");
+
+            logger.LogInformation(
+                "Creating Persona inquiry for reference id {ReferenceId} using template {TemplateId}.",
+                input.ReferenceId,
+                options.InquiryTemplateId);
+
+            using var response = await httpClient.SendAsync(request, cancellationToken);
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                logger.LogWarning(
+                    "Persona inquiry creation failed with status {StatusCode}. Response: {ResponseBody}",
+                    (int)response.StatusCode,
+                    responseBody);
+
+                return new CreatePersonaInquiryResult
+                {
+                    Error = $"Persona inquiry creation failed with status {(int)response.StatusCode}: {Truncate(responseBody)}"
+                };
+            }
+
+            using var document = JsonDocument.Parse(responseBody);
+
+            if (!document.RootElement.TryGetProperty("data", out var data)
+                || !data.TryGetProperty("id", out var idElement)
+                || !data.TryGetProperty("attributes", out var attributes)
+                || !attributes.TryGetProperty("status", out var statusElement))
+            {
+                logger.LogWarning(
+                    "Persona inquiry creation response was missing expected fields. Response: {ResponseBody}",
+                    responseBody);
+
+                return new CreatePersonaInquiryResult
+                {
+                    Error = $"Persona inquiry creation response was missing expected fields: {Truncate(responseBody)}"
+                };
+            }
+
             return new CreatePersonaInquiryResult
             {
-                Error = $"Persona inquiry creation failed with status {(int)response.StatusCode}."
+                Success = true,
+                InquiryId = idElement.GetString(),
+                InquiryStatus = statusElement.GetString()?.Trim().ToLowerInvariant()
             };
         }
-
-        using var document = JsonDocument.Parse(responseBody);
-
-        if (!document.RootElement.TryGetProperty("data", out var data)
-            || !data.TryGetProperty("id", out var idElement)
-            || !data.TryGetProperty("attributes", out var attributes)
-            || !attributes.TryGetProperty("status", out var statusElement))
+        catch (Exception exception)
         {
+            logger.LogError(exception, "Persona inquiry creation threw an exception.");
+
             return new CreatePersonaInquiryResult
             {
-                Error = "Persona inquiry creation response was missing expected fields."
+                Error = $"Persona inquiry creation threw an exception: {exception.Message}"
             };
         }
-
-        return new CreatePersonaInquiryResult
-        {
-            Success = true,
-            InquiryId = idElement.GetString(),
-            InquiryStatus = statusElement.GetString()?.Trim().ToLowerInvariant()
-        };
     }
 
     public async Task<PersonaGovernmentIdDataResult> GetGovernmentIdDataAsync(
@@ -99,7 +129,7 @@ public sealed class PersonaClient(
 
         using var inquiryRequest = new HttpRequestMessage(
             HttpMethod.Get,
-            $"/api/v1/inquiries/{Uri.EscapeDataString(inquiryId)}?include=verifications");
+            BuildUri($"/api/v1/inquiries/{Uri.EscapeDataString(inquiryId)}?include=verifications"));
         inquiryRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
 
         using var inquiryResponse = await httpClient.SendAsync(inquiryRequest, cancellationToken);
@@ -117,7 +147,7 @@ public sealed class PersonaClient(
 
         using var governmentIdRequest = new HttpRequestMessage(
             HttpMethod.Get,
-            $"/api/v1/verifications/government-id/{Uri.EscapeDataString(governmentIdVerificationId)}");
+            BuildUri($"/api/v1/verifications/government-id/{Uri.EscapeDataString(governmentIdVerificationId)}"));
         governmentIdRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
 
         using var governmentIdResponse = await httpClient.SendAsync(governmentIdRequest, cancellationToken);
@@ -203,4 +233,44 @@ public sealed class PersonaClient(
         return value.Length <= 4 ? value : value[^4..];
     }
 
+    private static string Truncate(string value)
+    {
+        const int maxLength = 300;
+        return value.Length <= maxLength ? value : value[..maxLength];
+    }
+
+    private Uri BuildUri(string relativeOrAbsolutePath)
+    {
+        if (Uri.TryCreate(relativeOrAbsolutePath, UriKind.Absolute, out var absoluteUri))
+            return absoluteUri;
+
+        return new Uri(apiBaseUri, relativeOrAbsolutePath);
+    }
+
+    private static Uri CreateApiBaseUri(string? apiBaseUrl, ILogger logger)
+    {
+        if (string.IsNullOrWhiteSpace(apiBaseUrl))
+            return DefaultApiBaseUri;
+
+        if (!Uri.TryCreate(apiBaseUrl, UriKind.Absolute, out var uri))
+        {
+            logger.LogWarning(
+                "Persona ApiBaseUrl '{ApiBaseUrl}' is invalid. Falling back to {FallbackApiBaseUrl}.",
+                apiBaseUrl,
+                DefaultApiBaseUri);
+            return DefaultApiBaseUri;
+        }
+
+        if (uri.Scheme is not ("http" or "https"))
+        {
+            logger.LogWarning(
+                "Persona ApiBaseUrl '{ApiBaseUrl}' used unsupported scheme '{Scheme}'. Falling back to {FallbackApiBaseUrl}.",
+                apiBaseUrl,
+                uri.Scheme,
+                DefaultApiBaseUri);
+            return DefaultApiBaseUri;
+        }
+
+        return uri;
+    }
 }
