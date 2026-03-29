@@ -241,10 +241,12 @@ public sealed class PersonaClient(
 
     private Uri BuildUri(string relativeOrAbsolutePath)
     {
-        if (Uri.TryCreate(relativeOrAbsolutePath, UriKind.Absolute, out var absoluteUri))
+        if (Uri.TryCreate(relativeOrAbsolutePath, UriKind.Absolute, out var absoluteUri)
+            && absoluteUri.Scheme is "http" or "https")
             return absoluteUri;
 
-        return new Uri(apiBaseUri, relativeOrAbsolutePath);
+        var normalizedPath = relativeOrAbsolutePath.TrimStart('/');
+        return new Uri(apiBaseUri, normalizedPath);
     }
 
     private static Uri CreateApiBaseUri(string? apiBaseUrl, ILogger logger)
