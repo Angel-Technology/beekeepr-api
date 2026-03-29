@@ -1,3 +1,5 @@
+using BuzzKeepr.Domain.Enums;
+
 namespace BuzzKeepr.API.GraphQL.Types;
 
 public sealed class UserGraph
@@ -9,6 +11,12 @@ public sealed class UserGraph
     public string? DisplayName { get; init; }
 
     public bool EmailVerified { get; init; }
+
+    public IdentityVerificationStatus IdentityVerificationStatus { get; init; } = IdentityVerificationStatus.NotStarted;
+
+    public string? PersonaInquiryId { get; init; }
+
+    public PersonaInquiryStatus? PersonaInquiryStatus { get; init; }
 
     public DateTime CreatedAtUtc { get; init; }
 }

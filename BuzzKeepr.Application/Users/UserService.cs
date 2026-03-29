@@ -1,3 +1,4 @@
+using BuzzKeepr.Application.IdentityVerification;
 using BuzzKeepr.Application.Users.Models;
 using BuzzKeepr.Domain.Entities;
 
@@ -60,6 +61,9 @@ public sealed class UserService(IUserRepository userRepository) : IUserService
             Email = user.Email,
             DisplayName = user.DisplayName,
             EmailVerified = user.EmailVerified,
+            IdentityVerificationStatus = user.IdentityVerificationStatus,
+            PersonaInquiryId = user.PersonaInquiryId,
+            PersonaInquiryStatus = user.PersonaInquiryStatus,
             CreatedAtUtc = user.CreatedAtUtc
         };
     }

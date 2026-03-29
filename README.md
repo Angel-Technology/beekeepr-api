@@ -277,3 +277,63 @@ If you change the auth entities or `BuzzKeeprDbContext`, generate a new migratio
 dotnet ef migrations add <MigrationName> --project BuzzKeepr.Infrastructure --startup-project BuzzKeepr.Presentation --context BuzzKeeprDbContext --output-dir Persistence/Migrations
 dotnet ef database update --project BuzzKeepr.Infrastructure --startup-project BuzzKeepr.Presentation --context BuzzKeeprDbContext
 ```
+
+## Hosted Migration Option
+
+For hosted environments, the API can optionally apply EF migrations on startup when this environment variable is set:
+
+```bash
+Database__ApplyMigrationsOnStartup=true
+```
+
+Use this carefully. It is acceptable for early staging, but production should move toward a more explicit migration step.
+
+## Persona Backend Contract
+
+The API now includes backend-owned Persona inquiry state on the authenticated user:
+
+- `identityVerificationStatus`
+- `personaInquiryId`
+- `personaInquiryStatus`
+
+The frontend can read those fields from `currentUser` and call the new `startPersonaInquiry` mutation after sign-in to get a backend-created `inq_...` identifier.
+
+Required Persona config:
+
+```bash
+Persona__ApiKey=persona_live_or_sandbox_key
+Persona__InquiryTemplateId=itmpl_...
+Persona__WebhookSecrets__0=whsec_...
+```
+
+Optional Persona config:
+
+```bash
+Persona__ApiBaseUrl=https://api.withpersona.com
+```
+
+Webhook endpoint:
+
+- `POST /webhooks/persona`
+
+The webhook is signature-checked against the `Persona-Signature` header, then updates the matching user by `personaInquiryId`. The intended frontend contract is:
+
+1. Sign in.
+2. Query `currentUser`.
+3. If `identityVerificationStatus != APPROVED`, call `startPersonaInquiry`.
+4. Launch the Persona SDK with the returned `inquiryId`.
+5. Refresh `currentUser` after Persona flow completion and on app resume.
+
+When Persona returns a passed government-ID verification, the backend also persists a narrow set of verified document fields on the user record:
+
+- first name
+- last name
+- birthdate
+- address street 1
+- address street 2
+- address city
+- address subdivision/state
+- address postal code
+- country code
+- driver license last 4
+- driver license expiration date

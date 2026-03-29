@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using BuzzKeepr.Application.Auth.Models;
+using BuzzKeepr.Application.IdentityVerification;
 using BuzzKeepr.Application.Users.Models;
 using BuzzKeepr.Domain.Entities;
 using BuzzKeepr.Domain.Enums;
@@ -311,6 +312,9 @@ public sealed class AuthService(
             Email = user.Email,
             DisplayName = user.DisplayName,
             EmailVerified = user.EmailVerified,
+            IdentityVerificationStatus = user.IdentityVerificationStatus,
+            PersonaInquiryId = user.PersonaInquiryId,
+            PersonaInquiryStatus = user.PersonaInquiryStatus,
             CreatedAtUtc = user.CreatedAtUtc
         };
     }

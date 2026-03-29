@@ -25,7 +25,56 @@ public sealed class BuzzKeeprDbContext(DbContextOptions<BuzzKeeprDbContext> opti
             builder.Property(user => user.DisplayName)
                 .HasMaxLength(200);
 
+            builder.Property(user => user.IdentityVerificationStatus)
+                .HasConversion<string>()
+                .HasMaxLength(50)
+                .HasDefaultValue(BuzzKeepr.Domain.Enums.IdentityVerificationStatus.NotStarted)
+                .IsRequired();
+
+            builder.Property(user => user.PersonaInquiryId)
+                .HasMaxLength(100);
+
+            builder.Property(user => user.PersonaInquiryStatus)
+                .HasConversion<string>()
+                .HasMaxLength(50);
+
+            builder.Property(user => user.VerifiedFirstName)
+                .HasMaxLength(200);
+
+            builder.Property(user => user.VerifiedLastName)
+                .HasMaxLength(200);
+
+            builder.Property(user => user.VerifiedBirthdate)
+                .HasMaxLength(20);
+
+            builder.Property(user => user.VerifiedAddressStreet1)
+                .HasMaxLength(200);
+
+            builder.Property(user => user.VerifiedAddressStreet2)
+                .HasMaxLength(200);
+
+            builder.Property(user => user.VerifiedAddressCity)
+                .HasMaxLength(100);
+
+            builder.Property(user => user.VerifiedAddressSubdivision)
+                .HasMaxLength(100);
+
+            builder.Property(user => user.VerifiedAddressPostalCode)
+                .HasMaxLength(20);
+
+            builder.Property(user => user.VerifiedCountryCode)
+                .HasMaxLength(10);
+
+            builder.Property(user => user.VerifiedLicenseLast4)
+                .HasMaxLength(4);
+
+            builder.Property(user => user.VerifiedLicenseExpirationDate)
+                .HasMaxLength(20);
+
             builder.HasIndex(user => user.Email)
+                .IsUnique();
+
+            builder.HasIndex(user => user.PersonaInquiryId)
                 .IsUnique();
         });
 

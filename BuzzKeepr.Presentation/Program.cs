@@ -1,7 +1,11 @@
 using BuzzKeepr.API.GraphQL.Mutations;
 using BuzzKeepr.API.GraphQL.Queries;
 using BuzzKeepr.Application;
+using BuzzKeepr.Application.IdentityVerification;
 using BuzzKeepr.Infrastructure;
+using BuzzKeepr.Infrastructure.IdentityVerification;
+using BuzzKeepr.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -50,6 +54,10 @@ builder.Services.AddCors(options =>
 
 builder.Services
     .AddGraphQLServer()
+    .ModifyRequestOptions(options =>
+    {
+        options.IncludeExceptionDetails = isDevelopment;
+    })
     .AddQueryType<UserQueries>()
     .AddMutationType<UserMutations>();
 
@@ -66,6 +74,14 @@ builder.Services.AddSwaggerGen(options =>
 builder.Services.AddHealthChecks();
 
 var app = builder.Build();
+var applyMigrationsOnStartup = app.Configuration.GetValue<bool>("Database:ApplyMigrationsOnStartup");
+
+if (applyMigrationsOnStartup)
+{
+    using var scope = app.Services.CreateScope();
+    var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
+    dbContext.Database.Migrate();
+}
 
 if (app.Environment.IsDevelopment())
 {
@@ -96,5 +112,26 @@ app.MapGet("/", () =>
 
 app.MapHealthChecks("/health");
 app.MapGraphQL();
+app.MapPost("/webhooks/persona", async (
+    HttpContext httpContext,
+    PersonaWebhookSignatureVerifier signatureVerifier,
+    IIdentityVerificationService identityVerificationService,
+    CancellationToken cancellationToken) =>
+{
+    httpContext.Request.EnableBuffering();
+
+    using var reader = new StreamReader(httpContext.Request.Body, leaveOpen: true);
+    var rawRequestBody = await reader.ReadToEndAsync(cancellationToken);
+    httpContext.Request.Body.Position = 0;
+
+    var signatureHeader = httpContext.Request.Headers["Persona-Signature"].ToString();
+
+    if (!signatureVerifier.IsValid(signatureHeader, rawRequestBody))
+        return Results.Unauthorized();
+
+    await identityVerificationService.ProcessPersonaWebhookAsync(rawRequestBody, cancellationToken);
+
+    return Results.NoContent();
+});
 
 app.Run();
