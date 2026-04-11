@@ -268,4 +268,49 @@ public sealed class UserMutations
             Error = result.Error
         };
     }
+
+    public async Task<StartInstantCriminalCheckPayload> StartInstantCriminalCheckAsync(
+        StartInstantCriminalCheckInput input,
+        [Service] IAuthService authService,
+        [Service] IIdentityVerificationService identityVerificationService,
+        [Service] IHttpContextAccessor httpContextAccessor,
+        CancellationToken cancellationToken)
+    {
+        var httpContext = httpContextAccessor.HttpContext
+            ?? throw new InvalidOperationException("HTTP context is required for instant criminal checks.");
+
+        var currentUser = await authService.GetCurrentUserAsync(
+            SessionTokenResolver.Resolve(httpContext),
+            cancellationToken);
+
+        if (currentUser.User is null)
+        {
+            return new StartInstantCriminalCheckPayload
+            {
+                Error = "Authentication is required."
+            };
+        }
+
+        var result = await identityVerificationService.CreateInstantCriminalCheckAsync(
+            currentUser.User.Id,
+            new Application.IdentityVerification.Models.StartInstantCriminalCheckInput
+            {
+                FirstName = input.FirstName,
+                MiddleName = input.MiddleName,
+                LastName = input.LastName,
+                PhoneNumber = input.PhoneNumber,
+                DateOfBirth = input.DateOfBirth,
+                State = input.State
+            },
+            cancellationToken);
+
+        return new StartInstantCriminalCheckPayload
+        {
+            Success = result.Success,
+            CheckId = result.CheckId,
+            ResultCount = result.ResultCount,
+            HasPossibleMatches = result.HasPossibleMatches,
+            Error = result.Error
+        };
+    }
 }

@@ -8,6 +8,7 @@ namespace BuzzKeepr.Application.IdentityVerification;
 public sealed class IdentityVerificationService(
     IIdentityVerificationRepository identityVerificationRepository,
     IPersonaClient personaClient,
+    ICheckrTrustClient checkrTrustClient,
     ILogger<IdentityVerificationService> logger) : IIdentityVerificationService
 {
     private static readonly HashSet<IdentityVerificationStatus> RetryableStatuses =
@@ -153,6 +154,50 @@ public sealed class IdentityVerificationService(
             inquiryId,
             user.Id,
             user.IdentityVerificationStatus);
+    }
+
+    public async Task<CreateInstantCriminalCheckResult> CreateInstantCriminalCheckAsync(
+        Guid userId,
+        StartInstantCriminalCheckInput input,
+        CancellationToken cancellationToken)
+    {
+        logger.LogInformation("Starting Checkr Trust instant criminal check for user {UserId}.", userId);
+
+        var user = await identityVerificationRepository.GetByIdAsync(userId, cancellationToken);
+
+        if (user is null)
+        {
+            logger.LogWarning("Checkr Trust instant criminal check requested for missing user {UserId}.", userId);
+            return new CreateInstantCriminalCheckResult
+            {
+                Error = "Authenticated user was not found."
+            };
+        }
+
+        if (string.IsNullOrWhiteSpace(input.FirstName)
+            || string.IsNullOrWhiteSpace(input.LastName))
+        {
+            logger.LogWarning(
+                "Checkr Trust instant criminal check requested for user {UserId} without legal first and last name.",
+                userId);
+
+            return new CreateInstantCriminalCheckResult
+            {
+                Error = "First name and last name are required before running an instant criminal check."
+            };
+        }
+
+        return await checkrTrustClient.CreateInstantCriminalCheckAsync(
+            new CreateInstantCriminalCheckInput
+            {
+                FirstName = input.FirstName.Trim(),
+                MiddleName = string.IsNullOrWhiteSpace(input.MiddleName) ? null : input.MiddleName.Trim(),
+                LastName = input.LastName.Trim(),
+                PhoneNumber = string.IsNullOrWhiteSpace(input.PhoneNumber) ? null : input.PhoneNumber.Trim(),
+                Birthdate = string.IsNullOrWhiteSpace(input.DateOfBirth) ? null : input.DateOfBirth.Trim(),
+                State = string.IsNullOrWhiteSpace(input.State) ? null : input.State.Trim().ToUpperInvariant()
+            },
+            cancellationToken);
     }
 
     private static bool TryExtractInquiryPayload(

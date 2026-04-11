@@ -34,6 +34,8 @@ public static class DependencyInjection
             configuration.GetSection(GoogleAuthOptions.SectionName));
         services.Configure<PersonaOptions>(
             configuration.GetSection(PersonaOptions.SectionName));
+        services.Configure<CheckrTrustOptions>(
+            configuration.GetSection(CheckrTrustOptions.SectionName));
 
         var emailOptions = configuration
             .GetSection(EmailDeliveryOptions.SectionName)
@@ -55,6 +57,7 @@ public static class DependencyInjection
                 });
         });
 
+        services.AddMemoryCache();
         services.AddHttpClient<ResendEmailSignInSender>();
         services.AddHttpClient<PersonaClient>((serviceProvider, httpClient) =>
         {
@@ -65,10 +68,20 @@ public static class DependencyInjection
             if (Uri.TryCreate(personaOptions.ApiBaseUrl, UriKind.Absolute, out var baseUri))
                 httpClient.BaseAddress = baseUri;
         });
+        services.AddHttpClient<CheckrTrustClient>((serviceProvider, httpClient) =>
+        {
+            var checkrTrustOptions = serviceProvider
+                .GetRequiredService<IOptions<CheckrTrustOptions>>()
+                .Value;
+
+            if (Uri.TryCreate(checkrTrustOptions.ApiBaseUrl, UriKind.Absolute, out var baseUri))
+                httpClient.BaseAddress = baseUri;
+        });
         services.AddScoped<Application.Auth.IGoogleTokenVerifier, GoogleTokenVerifier>();
         services.AddScoped<Application.Auth.IEmailSignInSender, ResendEmailSignInSender>();
         services.AddScoped<Application.Auth.IAuthRepository, AuthRepository>();
         services.AddScoped<Application.IdentityVerification.IIdentityVerificationRepository, IdentityVerificationRepository>();
+        services.AddScoped<Application.IdentityVerification.ICheckrTrustClient, CheckrTrustClient>();
         services.AddScoped<Application.IdentityVerification.IPersonaClient, PersonaClient>();
         services.AddScoped<Application.Users.IUserRepository, UserRepository>();
         services.AddScoped<PersonaWebhookSignatureVerifier>();
