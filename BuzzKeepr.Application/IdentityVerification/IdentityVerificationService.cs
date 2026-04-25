@@ -155,16 +155,10 @@ public sealed class IdentityVerificationService(
             if (governmentIdData.Success)
             {
                 user.VerifiedFirstName = governmentIdData.FirstName;
+                user.VerifiedMiddleName = governmentIdData.MiddleName;
                 user.VerifiedLastName = governmentIdData.LastName;
                 user.VerifiedBirthdate = governmentIdData.Birthdate;
-                user.VerifiedAddressStreet1 = governmentIdData.AddressStreet1;
-                user.VerifiedAddressStreet2 = governmentIdData.AddressStreet2;
-                user.VerifiedAddressCity = governmentIdData.AddressCity;
-                user.VerifiedAddressSubdivision = governmentIdData.AddressSubdivision;
-                user.VerifiedAddressPostalCode = governmentIdData.AddressPostalCode;
-                user.VerifiedCountryCode = governmentIdData.CountryCode;
-                user.VerifiedLicenseLast4 = governmentIdData.LicenseNumberLast4;
-                user.VerifiedLicenseExpirationDate = governmentIdData.LicenseExpirationDate;
+                user.VerifiedLicenseState = NormalizeStateCode(governmentIdData.LicenseState);
                 user.PersonaVerifiedAtUtc = DateTime.UtcNow;
             }
         }
@@ -319,6 +313,15 @@ public sealed class IdentityVerificationService(
         }
 
         return null;
+    }
+
+    private static string? NormalizeStateCode(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return null;
+
+        var trimmed = raw.Trim();
+        return trimmed.Length == 2 ? trimmed.ToUpperInvariant() : trimmed;
     }
 
     private static PersonaInquiryStatus MapPersonaInquiryStatus(string inquiryStatus)

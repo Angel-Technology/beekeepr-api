@@ -64,18 +64,7 @@ public sealed class UserMutations
 
         return new CreateUserPayload
         {
-            User = new UserGraph
-            {
-                Id = result.User.Id,
-                Email = result.User.Email,
-                DisplayName = result.User.DisplayName,
-                EmailVerified = result.User.EmailVerified,
-                IdentityVerificationStatus = result.User.IdentityVerificationStatus,
-                PersonaInquiryId = result.User.PersonaInquiryId,
-                PersonaInquiryStatus = result.User.PersonaInquiryStatus,
-                TermsAcceptedAtUtc = result.User.TermsAcceptedAtUtc,
-                CreatedAtUtc = result.User.CreatedAtUtc
-            }
+            User = UserGraph.From(result.User)
         };
     }
 
@@ -150,18 +139,7 @@ public sealed class UserMutations
 
         return new VerifyEmailSignInPayload
         {
-            User = new UserGraph
-            {
-                Id = result.User.Id,
-                Email = result.User.Email,
-                DisplayName = result.User.DisplayName,
-                EmailVerified = result.User.EmailVerified,
-                IdentityVerificationStatus = result.User.IdentityVerificationStatus,
-                PersonaInquiryId = result.User.PersonaInquiryId,
-                PersonaInquiryStatus = result.User.PersonaInquiryStatus,
-                TermsAcceptedAtUtc = result.User.TermsAcceptedAtUtc,
-                CreatedAtUtc = result.User.CreatedAtUtc
-            },
+            User = UserGraph.From(result.User),
             Session = new AuthSessionGraph
             {
                 Token = result.SessionToken,
@@ -214,18 +192,7 @@ public sealed class UserMutations
 
         return new SignInWithGooglePayload
         {
-            User = new UserGraph
-            {
-                Id = result.User.Id,
-                Email = result.User.Email,
-                DisplayName = result.User.DisplayName,
-                EmailVerified = result.User.EmailVerified,
-                IdentityVerificationStatus = result.User.IdentityVerificationStatus,
-                PersonaInquiryId = result.User.PersonaInquiryId,
-                PersonaInquiryStatus = result.User.PersonaInquiryStatus,
-                TermsAcceptedAtUtc = result.User.TermsAcceptedAtUtc,
-                CreatedAtUtc = result.User.CreatedAtUtc
-            },
+            User = UserGraph.From(result.User),
             Session = new AuthSessionGraph
             {
                 Token = result.SessionToken,
@@ -287,18 +254,7 @@ public sealed class UserMutations
 
         return new AcceptTermsPayload
         {
-            User = new UserGraph
-            {
-                Id = result.User.Id,
-                Email = result.User.Email,
-                DisplayName = result.User.DisplayName,
-                EmailVerified = result.User.EmailVerified,
-                IdentityVerificationStatus = result.User.IdentityVerificationStatus,
-                PersonaInquiryId = result.User.PersonaInquiryId,
-                PersonaInquiryStatus = result.User.PersonaInquiryStatus,
-                TermsAcceptedAtUtc = result.User.TermsAcceptedAtUtc,
-                CreatedAtUtc = result.User.CreatedAtUtc
-            }
+            User = UserGraph.From(result.User)
         };
     }
 

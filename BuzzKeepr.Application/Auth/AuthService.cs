@@ -374,6 +374,13 @@ public sealed class AuthService(
             IdentityVerificationStatus = user.IdentityVerificationStatus,
             PersonaInquiryId = user.PersonaInquiryId,
             PersonaInquiryStatus = user.PersonaInquiryStatus,
+            VerifiedFirstName = user.VerifiedFirstName,
+            VerifiedMiddleName = user.VerifiedMiddleName,
+            VerifiedLastName = user.VerifiedLastName,
+            VerifiedBirthdate = user.VerifiedBirthdate,
+            VerifiedLicenseState = user.VerifiedLicenseState,
+            PhoneNumber = user.PhoneNumber,
+            PersonaVerifiedAtUtc = user.PersonaVerifiedAtUtc,
             TermsAcceptedAtUtc = user.TermsAcceptedAtUtc,
             CreatedAtUtc = user.CreatedAtUtc
         };

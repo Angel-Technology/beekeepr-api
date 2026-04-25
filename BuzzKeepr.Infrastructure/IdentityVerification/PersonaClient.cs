@@ -164,21 +164,14 @@ public sealed class PersonaClient(
             return new PersonaGovernmentIdDataResult();
         }
 
-        var licenseNumber = GetString(attributes, "identification-number");
         return new PersonaGovernmentIdDataResult
         {
             Success = true,
             FirstName = GetString(attributes, "name-first"),
+            MiddleName = GetString(attributes, "name-middle"),
             LastName = GetString(attributes, "name-last"),
             Birthdate = GetString(attributes, "birthdate"),
-            AddressStreet1 = GetString(attributes, "address-street-1"),
-            AddressStreet2 = GetString(attributes, "address-street-2"),
-            AddressCity = GetString(attributes, "address-city"),
-            AddressSubdivision = GetString(attributes, "address-subdivision"),
-            AddressPostalCode = GetString(attributes, "address-postal-code"),
-            CountryCode = GetString(attributes, "country-code"),
-            LicenseNumberLast4 = GetLast4(licenseNumber),
-            LicenseExpirationDate = GetString(attributes, "expiration-date")
+            LicenseState = GetString(attributes, "issuing-subdivision")
         };
     }
 
@@ -223,14 +216,6 @@ public sealed class PersonaClient(
         return element.TryGetProperty(propertyName, out var valueElement)
             ? valueElement.GetString()?.Trim()
             : null;
-    }
-
-    private static string? GetLast4(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-            return null;
-
-        return value.Length <= 4 ? value : value[^4..];
     }
 
     private static string Truncate(string value)

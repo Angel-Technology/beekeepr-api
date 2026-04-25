@@ -44,35 +44,20 @@ public sealed class BuzzKeeprDbContext(DbContextOptions<BuzzKeeprDbContext> opti
             builder.Property(user => user.VerifiedFirstName)
                 .HasMaxLength(200);
 
+            builder.Property(user => user.VerifiedMiddleName)
+                .HasMaxLength(200);
+
             builder.Property(user => user.VerifiedLastName)
                 .HasMaxLength(200);
 
             builder.Property(user => user.VerifiedBirthdate)
                 .HasMaxLength(20);
 
-            builder.Property(user => user.VerifiedAddressStreet1)
-                .HasMaxLength(200);
-
-            builder.Property(user => user.VerifiedAddressStreet2)
-                .HasMaxLength(200);
-
-            builder.Property(user => user.VerifiedAddressCity)
-                .HasMaxLength(100);
-
-            builder.Property(user => user.VerifiedAddressSubdivision)
-                .HasMaxLength(100);
-
-            builder.Property(user => user.VerifiedAddressPostalCode)
-                .HasMaxLength(20);
-
-            builder.Property(user => user.VerifiedCountryCode)
+            builder.Property(user => user.VerifiedLicenseState)
                 .HasMaxLength(10);
 
-            builder.Property(user => user.VerifiedLicenseLast4)
-                .HasMaxLength(4);
-
-            builder.Property(user => user.VerifiedLicenseExpirationDate)
-                .HasMaxLength(20);
+            builder.Property(user => user.PhoneNumber)
+                .HasMaxLength(32);
 
             builder.Property(user => user.CheckrProfileId)
                 .HasMaxLength(64);

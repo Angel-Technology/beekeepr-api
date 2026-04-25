@@ -40,15 +40,10 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
         {
             Success = true,
             FirstName = "Jane",
+            MiddleName = "Quinn",
             LastName = "Doe",
             Birthdate = "1990-01-01",
-            AddressStreet1 = "123 Main St",
-            AddressCity = "San Francisco",
-            AddressSubdivision = "CA",
-            AddressPostalCode = "94105",
-            CountryCode = "US",
-            LicenseNumberLast4 = "1234",
-            LicenseExpirationDate = "2030-06-30"
+            LicenseState = "ca"
         };
 
         var (token, userId) = await SignInAsync();
@@ -72,9 +67,10 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
         Assert.Equal(IdentityVerificationStatus.Approved, user.IdentityVerificationStatus);
         Assert.Equal(PersonaInquiryStatus.Approved, user.PersonaInquiryStatus);
         Assert.Equal("Jane", user.VerifiedFirstName);
+        Assert.Equal("Quinn", user.VerifiedMiddleName);
         Assert.Equal("Doe", user.VerifiedLastName);
-        Assert.Equal("94105", user.VerifiedAddressPostalCode);
-        Assert.Equal("1234", user.VerifiedLicenseLast4);
+        Assert.Equal("1990-01-01", user.VerifiedBirthdate);
+        Assert.Equal("CA", user.VerifiedLicenseState);
         Assert.NotNull(user.PersonaVerifiedAtUtc);
     }
 
