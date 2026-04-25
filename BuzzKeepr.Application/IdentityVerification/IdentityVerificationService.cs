@@ -174,8 +174,10 @@ public sealed class IdentityVerificationService(
             };
         }
 
-        if (string.IsNullOrWhiteSpace(input.FirstName)
-            || string.IsNullOrWhiteSpace(input.LastName))
+        var hasExistingProfile = !string.IsNullOrWhiteSpace(user.CheckrProfileId);
+
+        if (!hasExistingProfile
+            && (string.IsNullOrWhiteSpace(input.FirstName) || string.IsNullOrWhiteSpace(input.LastName)))
         {
             logger.LogWarning(
                 "Checkr Trust instant criminal check requested for user {UserId} without legal first and last name.",
@@ -187,8 +189,12 @@ public sealed class IdentityVerificationService(
             };
         }
 
-        return await checkrTrustClient.CreateInstantCriminalCheckAsync(
-            new CreateInstantCriminalCheckInput
+        var clientInput = hasExistingProfile
+            ? new CreateInstantCriminalCheckInput
+            {
+                ProfileId = user.CheckrProfileId
+            }
+            : new CreateInstantCriminalCheckInput
             {
                 FirstName = input.FirstName.Trim(),
                 MiddleName = string.IsNullOrWhiteSpace(input.MiddleName) ? null : input.MiddleName.Trim(),
@@ -196,8 +202,32 @@ public sealed class IdentityVerificationService(
                 PhoneNumber = string.IsNullOrWhiteSpace(input.PhoneNumber) ? null : input.PhoneNumber.Trim(),
                 Birthdate = string.IsNullOrWhiteSpace(input.DateOfBirth) ? null : input.DateOfBirth.Trim(),
                 State = string.IsNullOrWhiteSpace(input.State) ? null : input.State.Trim().ToUpperInvariant()
-            },
-            cancellationToken);
+            };
+
+        var result = await checkrTrustClient.CreateInstantCriminalCheckAsync(clientInput, cancellationToken);
+
+        if (!result.Success)
+            return result;
+
+        if (!string.IsNullOrWhiteSpace(result.ProfileId))
+            user.CheckrProfileId = result.ProfileId;
+
+        if (!string.IsNullOrWhiteSpace(result.CheckId))
+            user.CheckrLastCheckId = result.CheckId;
+
+        user.CheckrLastCheckAtUtc = DateTime.UtcNow;
+        user.CheckrLastCheckHasPossibleMatches = result.HasPossibleMatches;
+
+        await identityVerificationRepository.SaveChangesAsync(cancellationToken);
+
+        logger.LogInformation(
+            "Checkr Trust instant criminal check completed for user {UserId}. CheckId={CheckId} ProfileId={ProfileId} HasPossibleMatches={HasPossibleMatches}",
+            user.Id,
+            result.CheckId,
+            result.ProfileId,
+            result.HasPossibleMatches);
+
+        return result;
     }
 
     private static bool TryExtractInquiryPayload(

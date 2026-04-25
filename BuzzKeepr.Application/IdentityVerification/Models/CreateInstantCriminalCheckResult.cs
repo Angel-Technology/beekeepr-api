@@ -6,6 +6,8 @@ public sealed class CreateInstantCriminalCheckResult
 
     public string? CheckId { get; init; }
 
+    public string? ProfileId { get; init; }
+
     public int? ResultCount { get; init; }
 
     public bool? HasPossibleMatches { get; init; }

@@ -42,6 +42,14 @@ public sealed class User
 
     public DateTime? PersonaVerifiedAtUtc { get; set; }
 
+    public string? CheckrProfileId { get; set; }
+
+    public string? CheckrLastCheckId { get; set; }
+
+    public DateTime? CheckrLastCheckAtUtc { get; set; }
+
+    public bool? CheckrLastCheckHasPossibleMatches { get; set; }
+
     public DateTime? TermsAcceptedAtUtc { get; set; }
 
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;

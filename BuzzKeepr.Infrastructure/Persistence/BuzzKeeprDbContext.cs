@@ -71,6 +71,15 @@ public sealed class BuzzKeeprDbContext(DbContextOptions<BuzzKeeprDbContext> opti
             builder.Property(user => user.VerifiedLicenseExpirationDate)
                 .HasMaxLength(20);
 
+            builder.Property(user => user.CheckrProfileId)
+                .HasMaxLength(64);
+
+            builder.Property(user => user.CheckrLastCheckId)
+                .HasMaxLength(64);
+
+            builder.Property(user => user.CheckrLastCheckAtUtc)
+                .HasColumnType("timestamp with time zone");
+
             builder.Property(user => user.TermsAcceptedAtUtc)
                 .HasColumnType("timestamp with time zone");
 
@@ -78,6 +87,9 @@ public sealed class BuzzKeeprDbContext(DbContextOptions<BuzzKeeprDbContext> opti
                 .IsUnique();
 
             builder.HasIndex(user => user.PersonaInquiryId)
+                .IsUnique();
+
+            builder.HasIndex(user => user.CheckrProfileId)
                 .IsUnique();
         });
 

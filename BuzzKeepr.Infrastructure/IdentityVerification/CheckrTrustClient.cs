@@ -52,17 +52,7 @@ public sealed class CheckrTrustClient(
             };
         }
 
-        var requestBody = new Dictionary<string, object?>
-        {
-            ["first_name"] = input.FirstName,
-            ["last_name"] = input.LastName
-        };
-
-        // Checkr Trust's public instant-criminal docs explicitly document first_name,
-        // last_name, and optional dob. Additional collected fields stay on our contract
-        // until their profile/check schema is confirmed for this integration.
-        if (!string.IsNullOrWhiteSpace(input.Birthdate))
-            requestBody["dob"] = NormalizeBirthdate(input.Birthdate);
+        var requestBody = BuildCreateCheckRequestBody(input);
 
         try
         {
@@ -109,6 +99,7 @@ public sealed class CheckrTrustClient(
             {
                 Success = true,
                 CheckId = TryGetString(document.RootElement, "id"),
+                ProfileId = TryGetString(document.RootElement, "profile_id"),
                 ResultCount = resultCount,
                 HasPossibleMatches = resultCount.HasValue ? resultCount.Value > 0 : null
             };
@@ -197,6 +188,41 @@ public sealed class CheckrTrustClient(
         return (response, responseBody);
     }
 
+    private Dictionary<string, object?> BuildCreateCheckRequestBody(CreateInstantCriminalCheckInput input)
+    {
+        var body = new Dictionary<string, object?>
+        {
+            ["check_type"] = "instant_criminal"
+        };
+
+        if (!string.IsNullOrWhiteSpace(options.RulesetId))
+            body["ruleset_id"] = options.RulesetId;
+
+        if (!string.IsNullOrWhiteSpace(input.ProfileId))
+        {
+            body["profile_id"] = input.ProfileId;
+            return body;
+        }
+
+        body["first_name"] = input.FirstName;
+        body["last_name"] = input.LastName;
+
+        if (!string.IsNullOrWhiteSpace(input.MiddleName))
+            body["middle_name"] = input.MiddleName;
+
+        if (!string.IsNullOrWhiteSpace(input.Birthdate))
+            body["dob"] = NormalizeBirthdate(input.Birthdate);
+
+        var phone = NormalizePhoneNumber(input.PhoneNumber);
+        if (!string.IsNullOrWhiteSpace(phone))
+            body["phone"] = phone;
+
+        if (!string.IsNullOrWhiteSpace(input.State))
+            body["source_states"] = new[] { input.State.Trim().ToUpperInvariant() };
+
+        return body;
+    }
+
     private static int? TryGetResultCount(JsonElement root)
     {
         if (root.TryGetProperty("results", out var resultsElement)
@@ -233,6 +259,24 @@ public sealed class CheckrTrustClient(
     {
         var digitsOnly = new string(birthdate.Where(char.IsDigit).ToArray());
         return digitsOnly.Length == 8 ? digitsOnly : birthdate.Trim();
+    }
+
+    private static string? NormalizePhoneNumber(string? phone)
+    {
+        if (string.IsNullOrWhiteSpace(phone))
+            return null;
+
+        var trimmed = phone.Trim();
+        if (trimmed.StartsWith('+'))
+            return trimmed;
+
+        var digitsOnly = new string(trimmed.Where(char.IsDigit).ToArray());
+        return digitsOnly.Length switch
+        {
+            10 => "+1" + digitsOnly,
+            11 when digitsOnly.StartsWith('1') => "+" + digitsOnly,
+            _ => trimmed
+        };
     }
 
     private static string Truncate(string value)
