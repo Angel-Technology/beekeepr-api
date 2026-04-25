@@ -10,6 +10,8 @@ public sealed class User
 
     public string? DisplayName { get; set; }
 
+    public string? ImageUrl { get; set; }
+
     public bool EmailVerified { get; set; }
 
     public IdentityVerificationStatus IdentityVerificationStatus { get; set; } = IdentityVerificationStatus.NotStarted;

@@ -30,9 +30,13 @@ No PII is persisted on our side.
 
 | Operation | Type | Input | Output | Auth required |
 | --------- | ---- | ----- | ------ | ------------- |
-| `startInstantCriminalCheck` | mutation | `firstName`, `lastName`, `middleName?`, `phoneNumber?`, `dateOfBirth?`, `state?` | `check_id`, `profile_id`, `result_count`, `has_possible_matches`, `error` | yes |
+| `startInstantCriminalCheck` | mutation | `phoneNumber?` (the only field — everything else is pulled from the user's verified identity) | `check_id`, `profile_id`, `result_count`, `has_possible_matches`, `error` | yes |
 
-If the calling user already has a `checkr_profile_id`, the input PII fields are ignored — we send the profile id instead. `firstName`/`lastName` only get validated when there is no existing profile.
+**Verified identity is required.** If `user.VerifiedFirstName` or `VerifiedLastName` is null (the user hasn't completed Persona), the mutation returns `"Identity verification must be completed before running a background check."` and never calls Checkr.
+
+**Verified fields are locked.** First/middle/last name, DOB, and license state come straight from `user.Verified*` — the frontend cannot override them. This is a deliberate security choice: the whole point of running people through Persona is that we trust the identity we send to Checkr, and we'd erase that trust if we let users edit the verified data after the fact.
+
+**Phone is the one editable field.** `user.PhoneNumber` holds the most-recently-supplied phone. The mutation accepts an optional `phoneNumber` input which, if provided, is sent to Checkr **and** persisted on the user (overwriting any prior value). If no input is supplied, we fall back to `user.PhoneNumber`. Phone is never verified, so editing it is fine.
 
 ## Wire format we send to Checkr
 

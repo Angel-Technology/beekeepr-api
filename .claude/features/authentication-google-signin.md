@@ -28,7 +28,7 @@ The frontend uses Google Identity Services to obtain an ID token (JWT). It posts
 
 | Operation | Type | Input | Output |
 | --------- | ---- | ----- | ------ |
-| `signInWithGoogle` | mutation | `idToken` | user, session token, expires-at, error |
+| `signInWithGoogle` | mutation | `idToken` | user (with `imageUrl` populated from Google's `picture` claim), session token, expires-at, error |
 
 ## External services
 
@@ -69,6 +69,7 @@ The frontend uses Google Identity Services to obtain an ID token (JWT). It posts
 - The ID token's `aud` claim **must** match one of `Google:ClientIds`. Add a new client ID here when you ship a new platform.
 - Email is trimmed + lowercased before user lookup, same as email sign-in.
 - If a user already exists by email but has no Google link, this flow will create the link automatically (no separate "link account" step).
+- **`User.ImageUrl` is captured from Google's `picture` claim** on first sign-in, but only when the existing user record has no image yet (`??=` not `=`). We don't overwrite a user-set or already-fetched image on every sign-in.
 - Errors are returned on `SignInWithGoogleResult` — invalid token, audience mismatch, etc. Do not throw.
 
 ## Common changes and where they live

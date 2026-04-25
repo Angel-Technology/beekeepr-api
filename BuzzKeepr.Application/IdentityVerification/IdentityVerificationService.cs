@@ -191,17 +191,19 @@ public sealed class IdentityVerificationService(
         }
 
         var hasExistingProfile = !string.IsNullOrWhiteSpace(user.CheckrProfileId);
+        var trimmedPhone = string.IsNullOrWhiteSpace(input.PhoneNumber) ? null : input.PhoneNumber.Trim();
+        var effectivePhone = trimmedPhone ?? user.PhoneNumber;
 
         if (!hasExistingProfile
-            && (string.IsNullOrWhiteSpace(input.FirstName) || string.IsNullOrWhiteSpace(input.LastName)))
+            && (string.IsNullOrWhiteSpace(user.VerifiedFirstName) || string.IsNullOrWhiteSpace(user.VerifiedLastName)))
         {
             logger.LogWarning(
-                "Checkr Trust instant criminal check requested for user {UserId} without legal first and last name.",
+                "Checkr Trust instant criminal check requested for user {UserId} without verified identity.",
                 userId);
 
             return new CreateInstantCriminalCheckResult
             {
-                Error = "First name and last name are required before running an instant criminal check."
+                Error = "Identity verification must be completed before running a background check."
             };
         }
 
@@ -212,12 +214,12 @@ public sealed class IdentityVerificationService(
             }
             : new CreateInstantCriminalCheckInput
             {
-                FirstName = input.FirstName.Trim(),
-                MiddleName = string.IsNullOrWhiteSpace(input.MiddleName) ? null : input.MiddleName.Trim(),
-                LastName = input.LastName.Trim(),
-                PhoneNumber = string.IsNullOrWhiteSpace(input.PhoneNumber) ? null : input.PhoneNumber.Trim(),
-                Birthdate = string.IsNullOrWhiteSpace(input.DateOfBirth) ? null : input.DateOfBirth.Trim(),
-                State = string.IsNullOrWhiteSpace(input.State) ? null : input.State.Trim().ToUpperInvariant()
+                FirstName = user.VerifiedFirstName!,
+                MiddleName = user.VerifiedMiddleName,
+                LastName = user.VerifiedLastName!,
+                Birthdate = user.VerifiedBirthdate,
+                State = user.VerifiedLicenseState,
+                PhoneNumber = effectivePhone
             };
 
         var result = await checkrTrustClient.CreateInstantCriminalCheckAsync(clientInput, cancellationToken);
@@ -233,6 +235,9 @@ public sealed class IdentityVerificationService(
 
         user.CheckrLastCheckAtUtc = DateTime.UtcNow;
         user.CheckrLastCheckHasPossibleMatches = result.HasPossibleMatches;
+
+        if (!string.IsNullOrWhiteSpace(trimmedPhone))
+            user.PhoneNumber = trimmedPhone;
 
         await identityVerificationRepository.SaveChangesAsync(cancellationToken);
 

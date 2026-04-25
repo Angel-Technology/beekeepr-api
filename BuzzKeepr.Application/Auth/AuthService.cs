@@ -263,12 +263,14 @@ public sealed class AuthService(
                 Id = Guid.NewGuid(),
                 Email = normalizedEmail,
                 DisplayName = string.IsNullOrWhiteSpace(identity.DisplayName) ? null : identity.DisplayName.Trim(),
+                ImageUrl = identity.ImageUrl,
                 EmailVerified = true,
                 CreatedAtUtc = nowUtc
             };
 
             user.EmailVerified = true;
             user.DisplayName ??= string.IsNullOrWhiteSpace(identity.DisplayName) ? null : identity.DisplayName.Trim();
+            user.ImageUrl ??= identity.ImageUrl;
 
             if (isNewUser) await authRepository.AddUserAsync(user, cancellationToken);
 
@@ -370,6 +372,7 @@ public sealed class AuthService(
             Id = user.Id,
             Email = user.Email,
             DisplayName = user.DisplayName,
+            ImageUrl = user.ImageUrl,
             EmailVerified = user.EmailVerified,
             IdentityVerificationStatus = user.IdentityVerificationStatus,
             PersonaInquiryId = user.PersonaInquiryId,

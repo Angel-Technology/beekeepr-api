@@ -316,12 +316,7 @@ public sealed class UserMutations
             currentUser.User.Id,
             new Application.IdentityVerification.Models.StartInstantCriminalCheckInput
             {
-                FirstName = input.FirstName,
-                MiddleName = input.MiddleName,
-                LastName = input.LastName,
-                PhoneNumber = input.PhoneNumber,
-                DateOfBirth = input.DateOfBirth,
-                State = input.State
+                PhoneNumber = input.PhoneNumber
             },
             cancellationToken);
 

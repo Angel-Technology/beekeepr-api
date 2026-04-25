@@ -10,6 +10,8 @@ public sealed class UserDto
 
     public string? DisplayName { get; init; }
 
+    public string? ImageUrl { get; init; }
+
     public bool EmailVerified { get; init; }
 
     public IdentityVerificationStatus IdentityVerificationStatus { get; init; } = IdentityVerificationStatus.NotStarted;

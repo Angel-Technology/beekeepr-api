@@ -25,6 +25,9 @@ public sealed class BuzzKeeprDbContext(DbContextOptions<BuzzKeeprDbContext> opti
             builder.Property(user => user.DisplayName)
                 .HasMaxLength(200);
 
+            builder.Property(user => user.ImageUrl)
+                .HasMaxLength(2048);
+
             builder.Property(user => user.IdentityVerificationStatus)
                 .HasConversion<string>()
                 .HasMaxLength(50)

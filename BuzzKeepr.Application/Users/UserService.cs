@@ -103,6 +103,7 @@ public sealed class UserService(
             Id = user.Id,
             Email = user.Email,
             DisplayName = user.DisplayName,
+            ImageUrl = user.ImageUrl,
             EmailVerified = user.EmailVerified,
             IdentityVerificationStatus = user.IdentityVerificationStatus,
             PersonaInquiryId = user.PersonaInquiryId,

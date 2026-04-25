@@ -22,6 +22,36 @@ public sealed class GoogleSignInTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SignInWithGoogle_NewUser_CapturesImageUrlFromGoogle()
+    {
+        const string idToken = "google-id-token-image";
+        var email = $"image-{Guid.NewGuid():N}@buzzkeepr.test";
+        const string pictureUrl = "https://lh3.googleusercontent.com/a/test-picture-id";
+        factory.FakeGoogleVerifier.RegisterValidToken(idToken, new GoogleIdentity
+        {
+            ProviderAccountId = $"google-acct-{Guid.NewGuid():N}",
+            Email = email,
+            DisplayName = "Image Tester",
+            ImageUrl = pictureUrl
+        });
+
+        var graphql = new GraphQLClient(factory.CreateClient());
+
+        var response = await graphql.SendAsync<SignInWithGoogleData>(
+            "mutation($input: SignInWithGoogleInput!) { signInWithGoogle(input: $input) { user { id imageUrl } error } }",
+            new { input = new { idToken } });
+
+        var payload = response.RequireData().SignInWithGoogle;
+        Assert.Null(payload.Error);
+        Assert.Equal(pictureUrl, payload.User!.ImageUrl);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
+        var user = await dbContext.Users.AsNoTracking().FirstAsync(u => u.Email == email);
+        Assert.Equal(pictureUrl, user.ImageUrl);
+    }
+
+    [Fact]
     public async Task SignInWithGoogle_NewUser_CreatesUserAndExternalAccount()
     {
         const string idToken = "google-id-token-new";
@@ -125,7 +155,7 @@ public sealed class GoogleSignInTests(PostgresFixture postgres) : IAsyncLifetime
 
     private sealed record SignInWithGoogleData(SignInWithGooglePayload SignInWithGoogle);
     private sealed record SignInWithGooglePayload(GoogleUser? User, GoogleSession? Session, string? Error);
-    private sealed record GoogleUser(Guid Id, string Email, string? DisplayName, bool EmailVerified);
+    private sealed record GoogleUser(Guid Id, string Email, string? DisplayName, bool EmailVerified, string? ImageUrl);
     private sealed record GoogleSession(string Token, DateTime ExpiresAtUtc);
 
     private sealed record VerifyEmailSignInData(VerifyEmailSignInPayload VerifyEmailSignIn);

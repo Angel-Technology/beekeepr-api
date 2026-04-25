@@ -10,6 +10,7 @@ public sealed class UserGraph
         Id = user.Id,
         Email = user.Email,
         DisplayName = user.DisplayName,
+        ImageUrl = user.ImageUrl,
         EmailVerified = user.EmailVerified,
         IdentityVerificationStatus = user.IdentityVerificationStatus,
         PersonaInquiryId = user.PersonaInquiryId,
@@ -30,6 +31,8 @@ public sealed class UserGraph
     public string Email { get; init; } = string.Empty;
 
     public string? DisplayName { get; init; }
+
+    public string? ImageUrl { get; init; }
 
     public bool EmailVerified { get; init; }
 

@@ -32,7 +32,8 @@ Backend behavior at each stage:
 
 Everything lives directly on `users`. Migrations:
 - `20260321154755_AddPersonaIdentityVerification` (initial Persona columns)
-- `20260425XXXXXX_AddPersonaInquiryUpdatedAt` (adds the watermark column for out-of-order tolerance)
+- `20260425225310_AddPersonaInquiryUpdatedAt` (watermark column for out-of-order tolerance)
+- `20260425230812_SimplifyVerifiedIdentityFields` (drops the address + license-detail columns, adds `verified_middle_name`, `verified_license_state`, `phone_number`)
 
 | Column | Purpose |
 | ------ | ------- |
@@ -41,9 +42,12 @@ Everything lives directly on `users`. Migrations:
 | `persona_inquiry_status` | Mirrors Persona's own vocabulary; for debugging, not for UI logic |
 | `persona_inquiry_updated_at_utc` | Watermark — last `updated-at` we processed from Persona; used to drop stale/replayed webhooks |
 | `persona_verified_at_utc` | Timestamp when verified data was first persisted |
-| `verified_first_name`, `verified_last_name`, `verified_birthdate` | Identity from the ID |
-| `verified_address_street1`, `verified_address_street2`, `verified_address_city`, `verified_address_subdivision`, `verified_address_postal_code`, `verified_country_code` | Verified address |
-| `verified_license_last4`, `verified_license_expiration_date` | License metadata (no full number stored) |
+| `verified_first_name` | From Persona's `name-first` |
+| `verified_middle_name` | From Persona's `name-middle` (may be null) |
+| `verified_last_name` | From Persona's `name-last` |
+| `verified_birthdate` | From Persona's `birthdate` (kept as-string, generally `YYYY-MM-DD`) |
+| `verified_license_state` | From Persona's `issuing-subdivision` (the state that issued the ID), normalized to upper-case 2-letter code where applicable. Used as Checkr's `source_states` filter |
+| `phone_number` | **Not from Persona.** User-supplied via the frontend. Used as Checkr's `phone` field |
 
 ## GraphQL surface
 
@@ -179,7 +183,8 @@ Always re-fetch `currentUser` on app focus / resume — there's no push-to-clien
 - **Reuse before recreate.** `startPersonaInquiry` reuses the existing inquiry unless its `identity_verification_status` is `Declined`, `Expired`, or `Failed` (the `RetryableStatuses` set).
 - **Webhooks are async + retried + out-of-order-capable.** Always go through the `persona_inquiry_updated_at_utc` watermark check before mutating. Never assume the latest webhook is the most recent state.
 - **`Completed` ≠ `Approved`.** Verified data may be present at `Completed` but the user isn't actually approved yet. UI gates on `Approved`.
-- **Don't store full license numbers**, only the last 4. Minimize PII.
+- **Store only what Checkr needs.** The Verified columns are deliberately scoped to first/middle/last/dob/license-state — anything else (address, license number, expiration) gets dropped on the floor. If a future feature needs more, add a column then; don't speculatively persist.
+- **Phone is not from Persona.** Persona doesn't capture it; the frontend collects it through a separate profile flow and writes to `phone_number`. Treat it like any other user-claimed field — no verification.
 - **No exceptions for business outcomes.** Webhook handler returns 204 once the signature is valid; business issues are logged + reflected in status.
 
 ## Common changes and where they live
