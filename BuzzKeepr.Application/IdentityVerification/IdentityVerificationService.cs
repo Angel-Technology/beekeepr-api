@@ -108,7 +108,7 @@ public sealed class IdentityVerificationService(
     {
         using var document = JsonDocument.Parse(rawRequestBody);
 
-        if (!TryExtractInquiryPayload(document.RootElement, out var inquiryId, out var inquiryStatus))
+        if (!TryExtractInquiryPayload(document.RootElement, out var inquiryId, out var inquiryStatus, out var inquiryUpdatedAtUtc))
         {
             logger.LogWarning("Persona webhook payload did not contain an inquiry id and status.");
             return;
@@ -122,11 +122,33 @@ public sealed class IdentityVerificationService(
             return;
         }
 
-        user.PersonaInquiryStatus = inquiryStatus;
-        user.IdentityVerificationStatus = MapIdentityVerificationStatus(inquiryStatus);
+        if (inquiryUpdatedAtUtc.HasValue
+            && user.PersonaInquiryUpdatedAtUtc.HasValue
+            && inquiryUpdatedAtUtc.Value <= user.PersonaInquiryUpdatedAtUtc.Value)
+        {
+            logger.LogInformation(
+                "Skipping stale Persona webhook for inquiry {InquiryId}: event @{IncomingUpdatedAt:o} is not newer than stored @{StoredUpdatedAt:o}.",
+                inquiryId,
+                inquiryUpdatedAtUtc.Value,
+                user.PersonaInquiryUpdatedAtUtc.Value);
+            return;
+        }
 
-        if (user.IdentityVerificationStatus is IdentityVerificationStatus.Approved
-            or IdentityVerificationStatus.Completed)
+        var newIdentityStatus = MapIdentityVerificationStatus(inquiryStatus);
+        var verifiedDataAlreadyPresent = !string.IsNullOrWhiteSpace(user.VerifiedFirstName);
+
+        user.PersonaInquiryStatus = inquiryStatus;
+        user.IdentityVerificationStatus = newIdentityStatus;
+
+        if (inquiryUpdatedAtUtc.HasValue)
+            user.PersonaInquiryUpdatedAtUtc = inquiryUpdatedAtUtc.Value;
+
+        var shouldFetchVerifiedData = newIdentityStatus
+                is IdentityVerificationStatus.Approved
+                or IdentityVerificationStatus.Completed
+            && !verifiedDataAlreadyPresent;
+
+        if (shouldFetchVerifiedData)
         {
             var governmentIdData = await personaClient.GetGovernmentIdDataAsync(inquiryId, cancellationToken);
 
@@ -233,10 +255,12 @@ public sealed class IdentityVerificationService(
     private static bool TryExtractInquiryPayload(
         JsonElement root,
         out string inquiryId,
-        out PersonaInquiryStatus inquiryStatus)
+        out PersonaInquiryStatus inquiryStatus,
+        out DateTime? inquiryUpdatedAtUtc)
     {
         inquiryId = string.Empty;
         inquiryStatus = default;
+        inquiryUpdatedAtUtc = null;
 
         if (!root.TryGetProperty("data", out var eventData)
             || !eventData.TryGetProperty("attributes", out var eventAttributes)
@@ -266,7 +290,35 @@ public sealed class IdentityVerificationService(
             return false;
 
         inquiryStatus = MapPersonaInquiryStatus(rawInquiryStatus);
+        inquiryUpdatedAtUtc = TryReadInquiryUpdatedAt(inquiryAttributes, eventAttributes);
         return true;
+    }
+
+    private static DateTime? TryReadInquiryUpdatedAt(JsonElement inquiryAttributes, JsonElement eventAttributes)
+    {
+        // Persona's inquiry attributes carry an "updated-at" ISO8601 string; fall back to the event's
+        // own "created-at" if for some reason the inquiry timestamp isn't present.
+        foreach (var propertyName in new[] { "updated-at", "updated_at" })
+        {
+            if (inquiryAttributes.TryGetProperty(propertyName, out var value)
+                && value.ValueKind == JsonValueKind.String
+                && DateTime.TryParse(value.GetString(), null, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal, out var parsed))
+            {
+                return DateTime.SpecifyKind(parsed, DateTimeKind.Utc);
+            }
+        }
+
+        foreach (var propertyName in new[] { "created-at", "created_at" })
+        {
+            if (eventAttributes.TryGetProperty(propertyName, out var value)
+                && value.ValueKind == JsonValueKind.String
+                && DateTime.TryParse(value.GetString(), null, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal, out var parsed))
+            {
+                return DateTime.SpecifyKind(parsed, DateTimeKind.Utc);
+            }
+        }
+
+        return null;
     }
 
     private static PersonaInquiryStatus MapPersonaInquiryStatus(string inquiryStatus)
@@ -274,9 +326,13 @@ public sealed class IdentityVerificationService(
         return inquiryStatus.Trim().ToLowerInvariant() switch
         {
             "created" => PersonaInquiryStatus.Created,
+            "started" => PersonaInquiryStatus.Pending,
             "pending" => PersonaInquiryStatus.Pending,
             "completed" => PersonaInquiryStatus.Completed,
             "needs-review" => PersonaInquiryStatus.NeedsReview,
+            "needs_review" => PersonaInquiryStatus.NeedsReview,
+            "marked-for-review" => PersonaInquiryStatus.NeedsReview,
+            "marked_for_review" => PersonaInquiryStatus.NeedsReview,
             "approved" => PersonaInquiryStatus.Approved,
             "declined" => PersonaInquiryStatus.Declined,
             "failed" => PersonaInquiryStatus.Failed,

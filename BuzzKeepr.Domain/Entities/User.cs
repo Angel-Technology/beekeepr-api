@@ -18,6 +18,8 @@ public sealed class User
 
     public PersonaInquiryStatus? PersonaInquiryStatus { get; set; }
 
+    public DateTime? PersonaInquiryUpdatedAtUtc { get; set; }
+
     public string? VerifiedFirstName { get; set; }
 
     public string? VerifiedLastName { get; set; }

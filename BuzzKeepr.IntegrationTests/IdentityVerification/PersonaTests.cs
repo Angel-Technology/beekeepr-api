@@ -133,6 +133,51 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Webhook_StaleEventArrivingAfterApproval_IsIgnored()
+    {
+        const string inquiryId = "inq_stale_test";
+        factory.FakePersona.NextCreateInquiryResult = new CreatePersonaInquiryResult
+        {
+            Success = true,
+            InquiryId = inquiryId,
+            InquiryStatus = "created"
+        };
+        factory.FakePersona.NextGovernmentIdDataResult = new PersonaGovernmentIdDataResult
+        {
+            Success = true,
+            FirstName = "Approved",
+            LastName = "User"
+        };
+
+        var (token, userId) = await SignInAsync();
+        var http = factory.CreateClient();
+        http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        var graphql = new GraphQLClient(http);
+
+        await graphql.SendAsync<JsonElement>(
+            "mutation { startPersonaInquiry { success error } }");
+
+        var approvedAt = DateTime.UtcNow;
+        var approvedBody = BuildInquiryWebhookBody(inquiryId, "approved", approvedAt);
+        var approvedResponse = await PostWebhookAsync(approvedBody, BuildSignatureHeader(WebhookSecret, approvedBody));
+        Assert.Equal(HttpStatusCode.NoContent, approvedResponse.StatusCode);
+
+        var staleCompletedAt = approvedAt.AddSeconds(-30);
+        var staleBody = BuildInquiryWebhookBody(inquiryId, "completed", staleCompletedAt);
+        var staleResponse = await PostWebhookAsync(staleBody, BuildSignatureHeader(WebhookSecret, staleBody));
+        Assert.Equal(HttpStatusCode.NoContent, staleResponse.StatusCode);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
+        var user = await dbContext.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
+
+        Assert.Equal(IdentityVerificationStatus.Approved, user.IdentityVerificationStatus);
+        Assert.Equal(PersonaInquiryStatus.Approved, user.PersonaInquiryStatus);
+
+        Assert.Single(factory.FakePersona.GetGovernmentIdDataCalls);
+    }
+
+    [Fact]
     public async Task Webhook_WithInvalidSignature_Returns401AndDoesNotMutateUser()
     {
         const string inquiryId = "inq_persona_unauthorized";
@@ -175,21 +220,27 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
         return await http.SendAsync(request);
     }
 
-    private static string BuildInquiryWebhookBody(string inquiryId, string status)
+    private static string BuildInquiryWebhookBody(string inquiryId, string status, DateTime? inquiryUpdatedAtUtc = null)
     {
+        var updatedAt = (inquiryUpdatedAtUtc ?? DateTime.UtcNow).ToString("o");
         var payload = new
         {
             data = new
             {
                 attributes = new
                 {
+                    name = $"inquiry.{status}",
                     payload = new
                     {
                         data = new
                         {
                             type = "inquiry",
                             id = inquiryId,
-                            attributes = new { status }
+                            attributes = new
+                            {
+                                status,
+                                updated_at = updatedAt
+                            }
                         }
                     }
                 }

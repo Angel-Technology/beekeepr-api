@@ -38,6 +38,9 @@ public sealed class BuzzKeeprDbContext(DbContextOptions<BuzzKeeprDbContext> opti
                 .HasConversion<string>()
                 .HasMaxLength(50);
 
+            builder.Property(user => user.PersonaInquiryUpdatedAtUtc)
+                .HasColumnType("timestamp with time zone");
+
             builder.Property(user => user.VerifiedFirstName)
                 .HasMaxLength(200);
 
