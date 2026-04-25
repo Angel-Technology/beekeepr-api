@@ -315,6 +315,7 @@ public sealed class AuthService(
             IdentityVerificationStatus = user.IdentityVerificationStatus,
             PersonaInquiryId = user.PersonaInquiryId,
             PersonaInquiryStatus = user.PersonaInquiryStatus,
+            TermsAcceptedAtUtc = user.TermsAcceptedAtUtc,
             CreatedAtUtc = user.CreatedAtUtc
         };
     }

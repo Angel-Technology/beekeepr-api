@@ -18,5 +18,7 @@ public sealed class UserDto
 
     public PersonaInquiryStatus? PersonaInquiryStatus { get; init; }
 
+    public DateTime? TermsAcceptedAtUtc { get; init; }
+
     public DateTime CreatedAtUtc { get; init; }
 }

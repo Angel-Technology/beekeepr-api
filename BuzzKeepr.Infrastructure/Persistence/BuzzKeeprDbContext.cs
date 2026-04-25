@@ -71,6 +71,9 @@ public sealed class BuzzKeeprDbContext(DbContextOptions<BuzzKeeprDbContext> opti
             builder.Property(user => user.VerifiedLicenseExpirationDate)
                 .HasMaxLength(20);
 
+            builder.Property(user => user.TermsAcceptedAtUtc)
+                .HasColumnType("timestamp with time zone");
+
             builder.HasIndex(user => user.Email)
                 .IsUnique();
 

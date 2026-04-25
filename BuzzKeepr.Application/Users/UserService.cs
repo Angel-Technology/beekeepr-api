@@ -53,6 +53,31 @@ public sealed class UserService(IUserRepository userRepository) : IUserService
         };
     }
 
+    public async Task<AcceptTermsResult> AcceptTermsAsync(
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var user = await userRepository.GetByIdForUpdateAsync(userId, cancellationToken);
+
+        if (user is null)
+        {
+            return new AcceptTermsResult
+            {
+                UserNotFound = true
+            };
+        }
+
+        user.TermsAcceptedAtUtc = DateTime.UtcNow;
+
+        await userRepository.SaveChangesAsync(cancellationToken);
+
+        return new AcceptTermsResult
+        {
+            Success = true,
+            User = MapUser(user)
+        };
+    }
+
     private static UserDto MapUser(User user)
     {
         return new UserDto
@@ -64,6 +89,7 @@ public sealed class UserService(IUserRepository userRepository) : IUserService
             IdentityVerificationStatus = user.IdentityVerificationStatus,
             PersonaInquiryId = user.PersonaInquiryId,
             PersonaInquiryStatus = user.PersonaInquiryStatus,
+            TermsAcceptedAtUtc = user.TermsAcceptedAtUtc,
             CreatedAtUtc = user.CreatedAtUtc
         };
     }

@@ -13,6 +13,12 @@ public sealed class UserRepository(BuzzKeeprDbContext dbContext) : IUserReposito
             .FirstOrDefaultAsync(user => user.Id == id, cancellationToken);
     }
 
+    public async Task<User?> GetByIdForUpdateAsync(Guid id, CancellationToken cancellationToken)
+    {
+        return await dbContext.Users
+            .FirstOrDefaultAsync(user => user.Id == id, cancellationToken);
+    }
+
     public async Task<bool> EmailExistsAsync(string email, CancellationToken cancellationToken)
     {
         return await dbContext.Users
@@ -24,5 +30,10 @@ public sealed class UserRepository(BuzzKeeprDbContext dbContext) : IUserReposito
     {
         dbContext.Users.Add(user);
         await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public Task SaveChangesAsync(CancellationToken cancellationToken)
+    {
+        return dbContext.SaveChangesAsync(cancellationToken);
     }
 }

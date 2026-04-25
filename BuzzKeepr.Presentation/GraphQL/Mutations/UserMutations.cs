@@ -1,9 +1,9 @@
 using BuzzKeepr.API.Auth;
-using BuzzKeepr.API.GraphQL.Inputs;
 using BuzzKeepr.API.GraphQL.Types;
 using BuzzKeepr.Application.Auth;
 using BuzzKeepr.Application.IdentityVerification;
 using BuzzKeepr.Application.Users;
+using BuzzKeepr.API.GraphQL.Inputs;
 using ApplicationRequestEmailSignInInput = BuzzKeepr.Application.Auth.Models.RequestEmailSignInInput;
 using ApplicationSignInWithGoogleInput = BuzzKeepr.Application.Auth.Models.SignInWithGoogleInput;
 using ApplicationCreateUserInput = BuzzKeepr.Application.Users.Models.CreateUserInput;
@@ -59,6 +59,7 @@ public sealed class UserMutations
                 IdentityVerificationStatus = result.User.IdentityVerificationStatus,
                 PersonaInquiryId = result.User.PersonaInquiryId,
                 PersonaInquiryStatus = result.User.PersonaInquiryStatus,
+                TermsAcceptedAtUtc = result.User.TermsAcceptedAtUtc,
                 CreatedAtUtc = result.User.CreatedAtUtc
             }
         };
@@ -142,6 +143,7 @@ public sealed class UserMutations
                 IdentityVerificationStatus = result.User.IdentityVerificationStatus,
                 PersonaInquiryId = result.User.PersonaInquiryId,
                 PersonaInquiryStatus = result.User.PersonaInquiryStatus,
+                TermsAcceptedAtUtc = result.User.TermsAcceptedAtUtc,
                 CreatedAtUtc = result.User.CreatedAtUtc
             },
             Session = new AuthSessionGraph
@@ -203,6 +205,7 @@ public sealed class UserMutations
                 IdentityVerificationStatus = result.User.IdentityVerificationStatus,
                 PersonaInquiryId = result.User.PersonaInquiryId,
                 PersonaInquiryStatus = result.User.PersonaInquiryStatus,
+                TermsAcceptedAtUtc = result.User.TermsAcceptedAtUtc,
                 CreatedAtUtc = result.User.CreatedAtUtc
             },
             Session = new AuthSessionGraph
@@ -230,6 +233,56 @@ public sealed class UserMutations
         return new SignOutPayload
         {
             Success = true
+        };
+    }
+
+    public async Task<AcceptTermsPayload> AcceptTermsAsync(
+        [Service] IAuthService authService,
+        [Service] IUserService userService,
+        [Service] IHttpContextAccessor httpContextAccessor,
+        CancellationToken cancellationToken)
+    {
+        var httpContext = httpContextAccessor.HttpContext
+            ?? throw new InvalidOperationException("HTTP context is required for terms acceptance.");
+
+        var currentUser = await authService.GetCurrentUserAsync(
+            SessionTokenResolver.Resolve(httpContext),
+            cancellationToken);
+
+        if (currentUser.User is null)
+        {
+            return new AcceptTermsPayload
+            {
+                Error = "Authentication is required."
+            };
+        }
+
+        var result = await userService.AcceptTermsAsync(
+            currentUser.User.Id,
+            cancellationToken);
+
+        if (result.UserNotFound || !result.Success || result.User is null)
+        {
+            return new AcceptTermsPayload
+            {
+                Error = "Unable to accept terms."
+            };
+        }
+
+        return new AcceptTermsPayload
+        {
+            User = new UserGraph
+            {
+                Id = result.User.Id,
+                Email = result.User.Email,
+                DisplayName = result.User.DisplayName,
+                EmailVerified = result.User.EmailVerified,
+                IdentityVerificationStatus = result.User.IdentityVerificationStatus,
+                PersonaInquiryId = result.User.PersonaInquiryId,
+                PersonaInquiryStatus = result.User.PersonaInquiryStatus,
+                TermsAcceptedAtUtc = result.User.TermsAcceptedAtUtc,
+                CreatedAtUtc = result.User.CreatedAtUtc
+            }
         };
     }
 

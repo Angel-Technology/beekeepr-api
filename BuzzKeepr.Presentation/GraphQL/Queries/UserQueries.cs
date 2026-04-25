@@ -24,6 +24,7 @@ public sealed class UserQueries
                 IdentityVerificationStatus = user.IdentityVerificationStatus,
                 PersonaInquiryId = user.PersonaInquiryId,
                 PersonaInquiryStatus = user.PersonaInquiryStatus,
+                TermsAcceptedAtUtc = user.TermsAcceptedAtUtc,
                 CreatedAtUtc = user.CreatedAtUtc
             };
     }
@@ -51,6 +52,7 @@ public sealed class UserQueries
                 IdentityVerificationStatus = result.User.IdentityVerificationStatus,
                 PersonaInquiryId = result.User.PersonaInquiryId,
                 PersonaInquiryStatus = result.User.PersonaInquiryStatus,
+                TermsAcceptedAtUtc = result.User.TermsAcceptedAtUtc,
                 CreatedAtUtc = result.User.CreatedAtUtc
             };
     }
