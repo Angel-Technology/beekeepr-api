@@ -1,5 +1,6 @@
 using BuzzKeepr.Application.Auth;
 using BuzzKeepr.Application.IdentityVerification;
+using BuzzKeepr.Application.Users;
 using BuzzKeepr.IntegrationTests.Common.Fakes;
 using BuzzKeepr.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
@@ -14,6 +15,7 @@ namespace BuzzKeepr.IntegrationTests.Common;
 public sealed class BuzzKeeprApiFactory(PostgresFixture postgres) : WebApplicationFactory<Program>
 {
     public FakeEmailSignInSender FakeEmailSender { get; } = new();
+    public FakeWelcomeEmailSender FakeWelcomeSender { get; } = new();
     public FakeGoogleTokenVerifier FakeGoogleVerifier { get; } = new();
     public FakePersonaClient FakePersona { get; } = new();
     public FakeCheckrTrustClient FakeCheckrTrust { get; } = new();
@@ -30,9 +32,10 @@ public sealed class BuzzKeeprApiFactory(PostgresFixture postgres) : WebApplicati
                 ["Database:Provider"] = "Postgres",
                 ["Database:ConnectionString"] = postgres.ConnectionString,
                 ["Database:ApplyMigrationsOnStartup"] = "true",
-                ["Email:FromEmail"] = "BuzzKeepr Test <test@buzzkeepr.local>",
                 ["Email:FrontendBaseUrl"] = "http://localhost:3000",
                 ["Email:ResendApiKey"] = "re_test_dummy_key",
+                ["Email:SignInTemplateId"] = "test-signin-template-id",
+                ["Email:WelcomeTemplateId"] = "test-welcome-template-id",
                 ["Google:ClientIds:0"] = "test-google-client-id.apps.googleusercontent.com",
                 ["Persona:ApiBaseUrl"] = "https://persona.test.invalid",
                 ["Persona:ApiKey"] = "persona_test_dummy",
@@ -49,16 +52,19 @@ public sealed class BuzzKeeprApiFactory(PostgresFixture postgres) : WebApplicati
         builder.ConfigureServices(services =>
         {
             services.RemoveAll<IEmailSignInSender>();
+            services.RemoveAll<IWelcomeEmailSender>();
             services.RemoveAll<IGoogleTokenVerifier>();
             services.RemoveAll<IPersonaClient>();
             services.RemoveAll<ICheckrTrustClient>();
 
             services.AddSingleton(FakeEmailSender);
+            services.AddSingleton(FakeWelcomeSender);
             services.AddSingleton(FakeGoogleVerifier);
             services.AddSingleton(FakePersona);
             services.AddSingleton(FakeCheckrTrust);
 
             services.AddScoped<IEmailSignInSender>(sp => sp.GetRequiredService<FakeEmailSignInSender>());
+            services.AddScoped<IWelcomeEmailSender>(sp => sp.GetRequiredService<FakeWelcomeEmailSender>());
             services.AddScoped<IGoogleTokenVerifier>(sp => sp.GetRequiredService<FakeGoogleTokenVerifier>());
             services.AddScoped<IPersonaClient>(sp => sp.GetRequiredService<FakePersonaClient>());
             services.AddScoped<ICheckrTrustClient>(sp => sp.GetRequiredService<FakeCheckrTrustClient>());

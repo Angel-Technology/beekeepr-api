@@ -1,35 +1,34 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using BuzzKeepr.Application.Auth;
+using BuzzKeepr.Application.Users;
 using BuzzKeepr.Infrastructure.Configuration;
 using Microsoft.Extensions.Options;
 
 namespace BuzzKeepr.Infrastructure.Auth;
 
-public sealed class ResendEmailSignInSender(
+public sealed class ResendWelcomeEmailSender(
     HttpClient httpClient,
-    IOptions<EmailDeliveryOptions> emailOptions) : IEmailSignInSender
+    IOptions<EmailDeliveryOptions> emailOptions) : IWelcomeEmailSender
 {
-    public async Task SendSignInCodeAsync(string email, string code, DateTime expiresAtUtc, CancellationToken cancellationToken)
+    public async Task SendWelcomeAsync(string email, string? displayName, CancellationToken cancellationToken)
     {
         var options = emailOptions.Value;
 
-        if (string.IsNullOrWhiteSpace(options.SignInTemplateId))
-            throw new InvalidOperationException("Email:SignInTemplateId is not configured.");
+        if (string.IsNullOrWhiteSpace(options.WelcomeTemplateId))
+            throw new InvalidOperationException("Email:WelcomeTemplateId is not configured.");
 
-        var expiresInMinutes = Math.Max(1, (int)Math.Round((expiresAtUtc - DateTime.UtcNow).TotalMinutes));
+        var firstName = ExtractFirstName(displayName);
 
         var payload = new
         {
             to = new[] { email },
             template = new
             {
-                id = options.SignInTemplateId,
+                id = options.WelcomeTemplateId,
                 variables = new
                 {
-                    code,
-                    expires_in_minutes = expiresInMinutes,
+                    firstname = firstName,
                     email
                 }
             }
@@ -48,6 +47,16 @@ public sealed class ResendEmailSignInSender(
 
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         throw new InvalidOperationException(
-            $"Resend sign-in email failed with status {(int)response.StatusCode}: {body}");
+            $"Resend welcome email failed with status {(int)response.StatusCode}: {body}");
+    }
+
+    private static string ExtractFirstName(string? displayName)
+    {
+        if (string.IsNullOrWhiteSpace(displayName))
+            return "there";
+
+        var first = displayName.Trim().Split(' ', 2, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault();
+        return string.IsNullOrEmpty(first) ? "there" : first;
     }
 }

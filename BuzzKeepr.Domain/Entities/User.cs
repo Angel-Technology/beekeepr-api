@@ -52,6 +52,8 @@ public sealed class User
 
     public DateTime? TermsAcceptedAtUtc { get; set; }
 
+    public DateTime? WelcomeEmailSentAtUtc { get; set; }
+
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 
     public ICollection<ExternalAccount> ExternalAccounts { get; set; } = new List<ExternalAccount>();

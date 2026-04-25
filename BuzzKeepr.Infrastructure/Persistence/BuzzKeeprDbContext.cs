@@ -83,6 +83,9 @@ public sealed class BuzzKeeprDbContext(DbContextOptions<BuzzKeeprDbContext> opti
             builder.Property(user => user.TermsAcceptedAtUtc)
                 .HasColumnType("timestamp with time zone");
 
+            builder.Property(user => user.WelcomeEmailSentAtUtc)
+                .HasColumnType("timestamp with time zone");
+
             builder.HasIndex(user => user.Email)
                 .IsUnique();
 

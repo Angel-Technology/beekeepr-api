@@ -2,16 +2,20 @@ using System.Security.Cryptography;
 using System.Text;
 using BuzzKeepr.Application.Auth.Models;
 using BuzzKeepr.Application.IdentityVerification;
+using BuzzKeepr.Application.Users;
 using BuzzKeepr.Application.Users.Models;
 using BuzzKeepr.Domain.Entities;
 using BuzzKeepr.Domain.Enums;
+using Microsoft.Extensions.Logging;
 
 namespace BuzzKeepr.Application.Auth;
 
 public sealed class AuthService(
     IAuthRepository authRepository,
     IEmailSignInSender emailSignInSender,
-    IGoogleTokenVerifier googleTokenVerifier) : IAuthService
+    IGoogleTokenVerifier googleTokenVerifier,
+    IWelcomeEmailSender welcomeEmailSender,
+    ILogger<AuthService> logger) : IAuthService
 {
     private const int MaxVerificationAttempts = 5;
     private static readonly TimeSpan SessionLifetime = TimeSpan.FromDays(30);
@@ -166,6 +170,7 @@ public sealed class AuthService(
         }
 
         var user = await authRepository.GetUserByEmailAsync(normalizedEmail, cancellationToken);
+        var isNewUser = user is null;
 
         if (user is null)
         {
@@ -202,6 +207,9 @@ public sealed class AuthService(
         await authRepository.AddSessionAsync(session, cancellationToken);
         await authRepository.SaveChangesAsync(cancellationToken);
 
+        if (isNewUser)
+            await TrySendWelcomeAsync(user, cancellationToken);
+
         return new VerifyEmailSignInResult
         {
             Success = true,
@@ -237,6 +245,7 @@ public sealed class AuthService(
             cancellationToken);
 
         User user;
+        var isNewUser = false;
 
         if (externalAccount is not null)
         {
@@ -247,7 +256,7 @@ public sealed class AuthService(
         else
         {
             var existingUser = await authRepository.GetUserByEmailAsync(normalizedEmail, cancellationToken);
-            var isNewUser = existingUser is null;
+            isNewUser = existingUser is null;
 
             user = existingUser ?? new User
             {
@@ -294,6 +303,9 @@ public sealed class AuthService(
         await authRepository.AddSessionAsync(session, cancellationToken);
         await authRepository.SaveChangesAsync(cancellationToken);
 
+        if (isNewUser)
+            await TrySendWelcomeAsync(user, cancellationToken);
+
         return new SignInWithGoogleResult
         {
             Success = true,
@@ -317,6 +329,23 @@ public sealed class AuthService(
     {
         var value = RandomNumberGenerator.GetInt32(0, 100000);
         return value.ToString("D5");
+    }
+
+    private async Task TrySendWelcomeAsync(User user, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await welcomeEmailSender.SendWelcomeAsync(user.Email, user.DisplayName, cancellationToken);
+            user.WelcomeEmailSentAtUtc = DateTime.UtcNow;
+            await authRepository.SaveChangesAsync(cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(
+                exception,
+                "Welcome email failed to send for user {UserId}; sweeper will retry.",
+                user.Id);
+        }
     }
 
     private static string? TrimToMax(string? value, int maxLength)

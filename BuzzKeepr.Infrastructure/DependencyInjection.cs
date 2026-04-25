@@ -59,6 +59,7 @@ public static class DependencyInjection
 
         services.AddMemoryCache();
         services.AddHttpClient<ResendEmailSignInSender>();
+        services.AddHttpClient<ResendWelcomeEmailSender>();
         services.AddHttpClient<PersonaClient>((serviceProvider, httpClient) =>
         {
             var personaOptions = serviceProvider
@@ -79,6 +80,7 @@ public static class DependencyInjection
         });
         services.AddScoped<Application.Auth.IGoogleTokenVerifier, GoogleTokenVerifier>();
         services.AddScoped<Application.Auth.IEmailSignInSender, ResendEmailSignInSender>();
+        services.AddScoped<Application.Users.IWelcomeEmailSender, ResendWelcomeEmailSender>();
         services.AddScoped<Application.Auth.IAuthRepository, AuthRepository>();
         services.AddScoped<Application.IdentityVerification.IIdentityVerificationRepository, IdentityVerificationRepository>();
         services.AddScoped<Application.IdentityVerification.ICheckrTrustClient, CheckrTrustClient>();
@@ -86,6 +88,7 @@ public static class DependencyInjection
         services.AddScoped<Application.Users.IUserRepository, UserRepository>();
         services.AddScoped<PersonaWebhookSignatureVerifier>();
         services.AddHostedService<Auth.SessionCleanupBackgroundService>();
+        services.AddHostedService<Auth.WelcomeEmailSweeperBackgroundService>();
 
         return services;
     }

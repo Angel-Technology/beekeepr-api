@@ -1,10 +1,14 @@
 using BuzzKeepr.Application.IdentityVerification;
 using BuzzKeepr.Application.Users.Models;
 using BuzzKeepr.Domain.Entities;
+using Microsoft.Extensions.Logging;
 
 namespace BuzzKeepr.Application.Users;
 
-public sealed class UserService(IUserRepository userRepository) : IUserService
+public sealed class UserService(
+    IUserRepository userRepository,
+    IWelcomeEmailSender welcomeEmailSender,
+    ILogger<UserService> logger) : IUserService
 {
     public async Task<UserDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
     {
@@ -45,6 +49,20 @@ public sealed class UserService(IUserRepository userRepository) : IUserService
         };
 
         await userRepository.AddAsync(user, cancellationToken);
+
+        try
+        {
+            await welcomeEmailSender.SendWelcomeAsync(user.Email, user.DisplayName, cancellationToken);
+            user.WelcomeEmailSentAtUtc = DateTime.UtcNow;
+            await userRepository.SaveChangesAsync(cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(
+                exception,
+                "Welcome email failed to send for user {UserId}; sweeper will retry.",
+                user.Id);
+        }
 
         return new CreateUserResult
         {

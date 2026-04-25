@@ -35,10 +35,11 @@ Token storage rule: **only the SHA-256 hash is persisted**. The raw 5-digit code
 
 - **Resend** for email delivery — `BuzzKeepr.Infrastructure/Auth/ResendEmailSignInSender.cs`.
 - Required config (`appsettings.json` → `Email:` section):
-  - `FromEmail`
   - `FrontendBaseUrl`
   - `ResendApiKey`
   - `ResendBaseUrl`
+  - `SignInTemplateId` / `WelcomeTemplateId`
+- The sender (`from`) and subject are configured **on each Resend template**, not in our config — the API call only sends `to`, `template.id`, and `template.variables`.
 
 ## Files to watch
 
@@ -105,6 +106,23 @@ Token storage rule: **only the SHA-256 hash is persisted**. The raw 5-digit code
   - `Origin` (or `Referer`) matches the configured allowlist (`Cors:AllowedOrigins`, plus `localhost`/`127.0.0.1` in Development).
 - Otherwise: returns `403 Forbidden`. No cookie present → no enforcement (anonymous reads from anywhere are fine).
 - Allowlist is built once at startup as `CsrfOriginAllowlist` and registered as a singleton.
+
+### Resend templates (wire contract)
+
+The HTML lives in the **Resend dashboard** (not in this repo). Our senders pass a `template: { id, variables }` payload to Resend. If a placeholder name is renamed in the dashboard, rename it on the same line in the matching sender or it'll arrive as the literal `{{var}}` string.
+
+| Template id | Trigger | Sender file | Variables passed |
+| --- | --- | --- | --- |
+| `e7042412-cef7-40fb-a805-a197ccf538b1` | `requestEmailSignIn` mutation | `BuzzKeepr.Infrastructure/Auth/ResendEmailSignInSender.cs` | `code` (5-digit), `expires_in_minutes` (int), `email` |
+| `601eecd1-c163-419d-8e4b-def86652881f` | New `User` row created (sign-in verify, Google sign-in, `createUser`) | `BuzzKeepr.Infrastructure/Auth/ResendWelcomeEmailSender.cs` | `firstname` (first token of `User.DisplayName`, `"there"` fallback), `email` |
+
+Template IDs bind to `Email:SignInTemplateId` and `Email:WelcomeTemplateId` in `appsettings*.json` (non-secret).
+
+### Welcome email — hybrid trigger
+
+- **Inline send** at the moment a `User` is created in `AuthService.VerifyEmailSignInAsync`, `AuthService.SignInWithGoogleAsync`, and `UserService.CreateAsync`. Wrapped in `try/catch` (`AuthService.TrySendWelcomeAsync`) — Resend hiccups never fail the sign-in.
+- On success the sender stamps `User.WelcomeEmailSentAtUtc`.
+- **Safety net:** `WelcomeEmailSweeperBackgroundService` runs every 15 min, picks up users where `WelcomeEmailSentAtUtc IS NULL AND CreatedAtUtc < now - 5 min` (give the inline send a chance first), batches of 50.
 
 ### IP and User-Agent capture
 

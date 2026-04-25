@@ -1,7 +1,9 @@
 using BuzzKeepr.Application.Auth;
 using BuzzKeepr.Application.Auth.Models;
+using BuzzKeepr.Application.Users;
 using BuzzKeepr.Domain.Entities;
 using BuzzKeepr.Domain.Enums;
+using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 
@@ -12,11 +14,12 @@ public sealed class AuthServiceTests
     private readonly IAuthRepository repository = Substitute.For<IAuthRepository>();
     private readonly IEmailSignInSender emailSender = Substitute.For<IEmailSignInSender>();
     private readonly IGoogleTokenVerifier googleVerifier = Substitute.For<IGoogleTokenVerifier>();
+    private readonly IWelcomeEmailSender welcomeSender = Substitute.For<IWelcomeEmailSender>();
     private readonly AuthService sut;
 
     public AuthServiceTests()
     {
-        sut = new AuthService(repository, emailSender, googleVerifier);
+        sut = new AuthService(repository, emailSender, googleVerifier, welcomeSender, NullLogger<AuthService>.Instance);
     }
 
     [Theory]

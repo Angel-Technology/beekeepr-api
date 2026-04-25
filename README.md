@@ -205,7 +205,6 @@ Sections expected at startup. Bold = must come from user-secrets in dev.
 | `Database` | `Provider` | `Postgres` (only provider wired today) |
 | `Database` | `ConnectionString` | Local default points at the docker container |
 | `Database` | `ApplyMigrationsOnStartup` | Optional, hosted only |
-| `Email` | `FromEmail` | Sender address shown to users |
 | `Email` | `FrontendBaseUrl` | Used in email links |
 | `Email` | **`ResendApiKey`** | Resend API key |
 | `Email` | `ResendBaseUrl` | Optional override |
