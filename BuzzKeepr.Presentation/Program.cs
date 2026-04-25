@@ -1,3 +1,4 @@
+using BuzzKeepr.API.Auth;
 using BuzzKeepr.API.GraphQL.Mutations;
 using BuzzKeepr.API.GraphQL.Queries;
 using BuzzKeepr.Application;
@@ -20,6 +21,9 @@ if (!string.IsNullOrWhiteSpace(port))
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddSingleton(serviceProvider => new CsrfOriginAllowlist(
+    serviceProvider.GetRequiredService<IHostEnvironment>(),
+    allowedOrigins));
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("Frontend", policy =>
@@ -94,6 +98,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors("Frontend");
+app.UseMiddleware<CsrfProtectionMiddleware>();
 
 app.MapGet("/", () =>
     {

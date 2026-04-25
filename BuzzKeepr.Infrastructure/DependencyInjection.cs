@@ -85,6 +85,7 @@ public static class DependencyInjection
         services.AddScoped<Application.IdentityVerification.IPersonaClient, PersonaClient>();
         services.AddScoped<Application.Users.IUserRepository, UserRepository>();
         services.AddScoped<PersonaWebhookSignatureVerifier>();
+        services.AddHostedService<Auth.SessionCleanupBackgroundService>();
 
         return services;
     }

@@ -13,6 +13,20 @@ namespace BuzzKeepr.API.GraphQL.Mutations;
 
 public sealed class UserMutations
 {
+    private static string? ResolveClientIpAddress(HttpContext httpContext)
+    {
+        if (httpContext.Request.Headers.TryGetValue("X-Forwarded-For", out var forwarded))
+        {
+            var first = forwarded.ToString().Split(',', 2, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                .FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(first))
+                return first;
+        }
+
+        return httpContext.Connection.RemoteIpAddress?.ToString();
+    }
+
+
     public async Task<CreateUserPayload> CreateUserAsync(
         CreateUserInput input,
         [Service] IUserService userService,
@@ -105,10 +119,15 @@ public sealed class UserMutations
         [Service] IHttpContextAccessor httpContextAccessor,
         CancellationToken cancellationToken)
     {
+        var httpContextEarly = httpContextAccessor.HttpContext
+            ?? throw new InvalidOperationException("HTTP context is required for sign-in.");
+
         var result = await authService.VerifyEmailSignInAsync(new ApplicationVerifyEmailSignInInput
         {
             Email = input.Email,
-            Code = input.Code
+            Code = input.Code,
+            IpAddress = ResolveClientIpAddress(httpContextEarly),
+            UserAgent = httpContextEarly.Request.Headers.UserAgent.ToString()
         }, cancellationToken);
 
         if (result.InvalidToken)
@@ -127,10 +146,7 @@ public sealed class UserMutations
             };
         }
 
-        var httpContext = httpContextAccessor.HttpContext
-            ?? throw new InvalidOperationException("HTTP context is required for session cookie issuance.");
-
-        SessionCookieManager.WriteSessionCookie(httpContext, result.SessionToken, result.ExpiresAtUtc.Value);
+        SessionCookieManager.WriteSessionCookie(httpContextEarly, result.SessionToken, result.ExpiresAtUtc.Value);
 
         return new VerifyEmailSignInPayload
         {
@@ -160,9 +176,14 @@ public sealed class UserMutations
         [Service] IHttpContextAccessor httpContextAccessor,
         CancellationToken cancellationToken)
     {
+        var httpContextEarly = httpContextAccessor.HttpContext
+            ?? throw new InvalidOperationException("HTTP context is required for sign-in.");
+
         var result = await authService.SignInWithGoogleAsync(new ApplicationSignInWithGoogleInput
         {
-            IdToken = input.IdToken
+            IdToken = input.IdToken,
+            IpAddress = ResolveClientIpAddress(httpContextEarly),
+            UserAgent = httpContextEarly.Request.Headers.UserAgent.ToString()
         }, cancellationToken);
 
         if (result.InvalidInput)
@@ -189,10 +210,7 @@ public sealed class UserMutations
             };
         }
 
-        var httpContext = httpContextAccessor.HttpContext
-            ?? throw new InvalidOperationException("HTTP context is required for session cookie issuance.");
-
-        SessionCookieManager.WriteSessionCookie(httpContext, result.SessionToken, result.ExpiresAtUtc.Value);
+        SessionCookieManager.WriteSessionCookie(httpContextEarly, result.SessionToken, result.ExpiresAtUtc.Value);
 
         return new SignInWithGooglePayload
         {
@@ -245,9 +263,7 @@ public sealed class UserMutations
         var httpContext = httpContextAccessor.HttpContext
             ?? throw new InvalidOperationException("HTTP context is required for terms acceptance.");
 
-        var currentUser = await authService.GetCurrentUserAsync(
-            SessionTokenResolver.Resolve(httpContext),
-            cancellationToken);
+        var currentUser = await SessionRefresher.ResolveAsync(httpContext, authService, cancellationToken);
 
         if (currentUser.User is null)
         {
@@ -295,9 +311,7 @@ public sealed class UserMutations
         var httpContext = httpContextAccessor.HttpContext
             ?? throw new InvalidOperationException("HTTP context is required for Persona inquiry creation.");
 
-        var currentUser = await authService.GetCurrentUserAsync(
-            SessionTokenResolver.Resolve(httpContext),
-            cancellationToken);
+        var currentUser = await SessionRefresher.ResolveAsync(httpContext, authService, cancellationToken);
 
         if (currentUser.User is null)
         {
@@ -332,9 +346,7 @@ public sealed class UserMutations
         var httpContext = httpContextAccessor.HttpContext
             ?? throw new InvalidOperationException("HTTP context is required for instant criminal checks.");
 
-        var currentUser = await authService.GetCurrentUserAsync(
-            SessionTokenResolver.Resolve(httpContext),
-            cancellationToken);
+        var currentUser = await SessionRefresher.ResolveAsync(httpContext, authService, cancellationToken);
 
         if (currentUser.User is null)
         {

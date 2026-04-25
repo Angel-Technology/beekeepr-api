@@ -83,14 +83,42 @@ Token storage rule: **only the SHA-256 hash is persisted**. The raw 5-digit code
 
 - Email is **always** trimmed and lowercased before lookup.
 - Code: 5 digits, 15-minute expiry, max 5 wrong attempts before the token is invalidated.
-- Session token: 64 hex chars, 30-day expiry, hashed before persist, delivered as HTTP-only cookie.
+- Session token: 64 hex chars, hashed before persist, delivered both as HTTP-only cookie *and* as `session.token` in the GraphQL payload (cookie for browsers, raw token for Bearer-using mobile clients).
 - Errors return on the Result object — `EmailRequired`, `InvalidToken`, `EmailDeliveryFailed`, etc. Do **not** throw.
+
+### Session lifetime — sliding 30 days
+
+- Initial expiry: `now + 30 days` (constants on `AuthService`: `SessionLifetime`, `SessionTouchInterval`).
+- **Sliding window:** every authenticated request flows through `AuthService.GetCurrentUserAsync`. If `LastSeenAtUtc` is more than 24h old, we bump both `LastSeenAtUtc` and `ExpiresAtUtc` (to `now + 30 days`) in a single `ExecuteUpdateAsync` call. Active users effectively stay signed in indefinitely.
+- The bumped expiry is surfaced on `CurrentUserResult.RefreshedSessionExpiresAtUtc`. Presentation's `SessionRefresher.ResolveAsync` re-issues the cookie with the new `Expires` attribute when (a) a bump happened and (b) the token came from the cookie (not Bearer-only).
+- Always call `SessionRefresher.ResolveAsync` rather than `IAuthService.GetCurrentUserAsync` directly — otherwise the browser cookie will expire before the DB session does.
+
+### Session cleanup
+
+- `SessionCleanupBackgroundService` (Infrastructure, `IHostedService`) runs hourly and deletes sessions where either `ExpiresAtUtc < now - 7 days` OR `RevokedAtUtc < now - 7 days`. The 7-day grace window is for forensics (e.g. correlating a logout that happened 3 days ago with a support ticket).
+- Implemented via `IAuthRepository.DeleteAgedSessionsAsync` → EF `ExecuteDeleteAsync`.
+
+### CSRF protection
+
+- `CsrfProtectionMiddleware` runs after CORS for every `POST /graphql` that includes the session cookie. It allows the request through if **either**:
+  - `Authorization: Bearer …` is present (mobile clients are CSRF-immune), **or**
+  - `Origin` (or `Referer`) matches the configured allowlist (`Cors:AllowedOrigins`, plus `localhost`/`127.0.0.1` in Development).
+- Otherwise: returns `403 Forbidden`. No cookie present → no enforcement (anonymous reads from anywhere are fine).
+- Allowlist is built once at startup as `CsrfOriginAllowlist` and registered as a singleton.
+
+### IP and User-Agent capture
+
+- Sign-in mutations (`VerifyEmailSignIn`, `SignInWithGoogle`) extract the client IP (`X-Forwarded-For` first, falling back to `RemoteIpAddress`) and `User-Agent` header in `UserMutations.ResolveClientIpAddress`, pass them through the input model, and persist them on the new `Session` row.
+- Stored as plain text on `sessions.ip_address` (max 64) and `sessions.user_agent` (max 512). Trimmed defensively on the way in.
 
 ## Common changes and where they live
 
 | Change | Touch this |
 | ------ | ---------- |
 | Change code length / TTL | `AuthService.cs` (constants near the top) |
-| Change session TTL or cookie name | `SessionCookieManager.cs` + `AuthService.cs` |
+| Change session TTL or touch interval | `SessionLifetime` / `SessionTouchInterval` constants in `AuthService.cs` |
+| Change session cookie name | `SessionCookieManager.SessionCookieName` |
 | New error variant | The relevant `*Result.cs` model + handle in `UserMutations.cs` payload mapping |
 | Switch email provider | New `IEmailSignInSender` impl in Infrastructure, swap registration in `Infrastructure/DependencyInjection.cs` |
+| Change cleanup cadence / grace period | `SessionCleanupBackgroundService.cs` (`RunInterval`, `RetentionGracePeriod`) |
+| Add an allowed origin (CORS + CSRF) | `Cors:AllowedOrigins` in appsettings — `CsrfOriginAllowlist` reads the same list |

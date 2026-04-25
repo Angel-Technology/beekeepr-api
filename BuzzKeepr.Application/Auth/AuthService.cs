@@ -14,20 +14,37 @@ public sealed class AuthService(
     IGoogleTokenVerifier googleTokenVerifier) : IAuthService
 {
     private const int MaxVerificationAttempts = 5;
+    private static readonly TimeSpan SessionLifetime = TimeSpan.FromDays(30);
+    private static readonly TimeSpan SessionTouchInterval = TimeSpan.FromHours(24);
 
     public async Task<CurrentUserResult> GetCurrentUserAsync(string? sessionToken, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(sessionToken))
             return new CurrentUserResult();
 
-        var user = await authRepository.GetUserBySessionTokenHashAsync(
+        var nowUtc = DateTime.UtcNow;
+        var session = await authRepository.GetActiveSessionByTokenHashAsync(
             HashToken(sessionToken),
-            DateTime.UtcNow,
+            nowUtc,
             cancellationToken);
+
+        if (session?.User is null)
+            return new CurrentUserResult();
+
+        DateTime? refreshedExpiresAtUtc = null;
+
+        var lastSeenAtUtc = session.LastSeenAtUtc ?? session.CreatedAtUtc;
+        if (nowUtc - lastSeenAtUtc >= SessionTouchInterval)
+        {
+            var newExpiresAtUtc = nowUtc.Add(SessionLifetime);
+            await authRepository.TouchSessionAsync(session.Id, nowUtc, newExpiresAtUtc, cancellationToken);
+            refreshedExpiresAtUtc = newExpiresAtUtc;
+        }
 
         return new CurrentUserResult
         {
-            User = user is null ? null : MapUser(user)
+            User = MapUser(session.User),
+            RefreshedSessionExpiresAtUtc = refreshedExpiresAtUtc
         };
     }
 
@@ -176,8 +193,10 @@ public sealed class AuthService(
             UserId = user.Id,
             TokenHash = HashToken(rawSessionToken),
             CreatedAtUtc = nowUtc,
-            ExpiresAtUtc = nowUtc.AddDays(30),
-            LastSeenAtUtc = nowUtc
+            ExpiresAtUtc = nowUtc.Add(SessionLifetime),
+            LastSeenAtUtc = nowUtc,
+            IpAddress = TrimToMax(input.IpAddress, 64),
+            UserAgent = TrimToMax(input.UserAgent, 512)
         };
 
         await authRepository.AddSessionAsync(session, cancellationToken);
@@ -266,8 +285,10 @@ public sealed class AuthService(
             UserId = user.Id,
             TokenHash = HashToken(rawSessionToken),
             CreatedAtUtc = nowUtc,
-            ExpiresAtUtc = nowUtc.AddDays(30),
-            LastSeenAtUtc = nowUtc
+            ExpiresAtUtc = nowUtc.Add(SessionLifetime),
+            LastSeenAtUtc = nowUtc,
+            IpAddress = TrimToMax(input.IpAddress, 64),
+            UserAgent = TrimToMax(input.UserAgent, 512)
         };
 
         await authRepository.AddSessionAsync(session, cancellationToken);
@@ -296,6 +317,15 @@ public sealed class AuthService(
     {
         var value = RandomNumberGenerator.GetInt32(0, 100000);
         return value.ToString("D5");
+    }
+
+    private static string? TrimToMax(string? value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var trimmed = value.Trim();
+        return trimmed.Length <= maxLength ? trimmed : trimmed[..maxLength];
     }
 
     private static string HashToken(string rawToken)
