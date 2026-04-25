@@ -373,6 +373,7 @@ public sealed class UserMutations
         {
             Success = result.Success,
             CheckId = result.CheckId,
+            ProfileId = result.ProfileId,
             ResultCount = result.ResultCount,
             HasPossibleMatches = result.HasPossibleMatches,
             Error = result.Error

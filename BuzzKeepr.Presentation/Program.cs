@@ -140,3 +140,5 @@ app.MapPost("/webhooks/persona", async (
 });
 
 app.Run();
+
+public partial class Program;
