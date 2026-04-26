@@ -12,7 +12,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace BuzzKeepr.IntegrationTests.Common;
 
-public sealed class BuzzKeeprApiFactory(PostgresFixture postgres) : WebApplicationFactory<Program>
+public sealed class BuzzKeeprApiFactory(PostgresFixture postgres, string? appApiKey = null) : WebApplicationFactory<Program>
 {
     public FakeEmailSignInSender FakeEmailSender { get; } = new();
     public FakeWelcomeEmailSender FakeWelcomeSender { get; } = new();
@@ -27,7 +27,7 @@ public sealed class BuzzKeeprApiFactory(PostgresFixture postgres) : WebApplicati
         builder.ConfigureAppConfiguration((_, configuration) =>
         {
             configuration.Sources.Clear();
-            configuration.AddInMemoryCollection(new Dictionary<string, string?>
+            var inMemoryConfig = new Dictionary<string, string?>
             {
                 ["Database:Provider"] = "Postgres",
                 ["Database:ConnectionString"] = postgres.ConnectionString,
@@ -46,7 +46,12 @@ public sealed class BuzzKeeprApiFactory(PostgresFixture postgres) : WebApplicati
                 ["CheckrTrust:ClientSecret"] = "checkr_test_secret",
                 ["CheckrTrust:RulesetId"] = "08f2b453-c8d9-481b-8f7b-93f767b7fa1f",
                 ["Cors:AllowedOrigins:0"] = "http://localhost:3000"
-            });
+            };
+
+            if (appApiKey is not null)
+                inMemoryConfig["Auth:AppApiKey"] = appApiKey;
+
+            configuration.AddInMemoryCollection(inMemoryConfig);
         });
 
         builder.ConfigureServices(services =>

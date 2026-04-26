@@ -45,6 +45,53 @@ public sealed class UserManagementTests(PostgresFixture postgres) : IAsyncLifeti
     }
 
     [Fact]
+    public async Task GetUserById_WithMatchingSession_ReturnsUser()
+    {
+        var (token, userId) = await SignInAsync();
+        var http = factory.CreateClient();
+        http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        var graphql = new GraphQLClient(http);
+
+        var response = await graphql.SendAsync<GetUserByIdData>(
+            "query($id: UUID!) { userById(id: $id) { id email } }",
+            new { id = userId });
+
+        var user = response.RequireData().UserById;
+        Assert.NotNull(user);
+        Assert.Equal(userId, user!.Id);
+    }
+
+    [Fact]
+    public async Task GetUserById_WithoutSession_ReturnsNull()
+    {
+        var (_, userId) = await SignInAsync();
+        var graphql = new GraphQLClient(factory.CreateClient());
+
+        var response = await graphql.SendAsync<GetUserByIdData>(
+            "query($id: UUID!) { userById(id: $id) { id } }",
+            new { id = userId });
+
+        Assert.Null(response.RequireData().UserById);
+    }
+
+    [Fact]
+    public async Task GetUserById_WithDifferentUsersSession_ReturnsNull()
+    {
+        var (_, otherUserId) = await SignInAsync();
+        var (callerToken, _) = await SignInAsync();
+
+        var http = factory.CreateClient();
+        http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", callerToken);
+        var graphql = new GraphQLClient(http);
+
+        var response = await graphql.SendAsync<GetUserByIdData>(
+            "query($id: UUID!) { userById(id: $id) { id email } }",
+            new { id = otherUserId });
+
+        Assert.Null(response.RequireData().UserById);
+    }
+
+    [Fact]
     public async Task AcceptTerms_WithoutSession_ReturnsAuthenticationRequiredError()
     {
         var graphql = new GraphQLClient(factory.CreateClient());
@@ -99,6 +146,9 @@ public sealed class UserManagementTests(PostgresFixture postgres) : IAsyncLifeti
         var data = verify.RequireData().VerifyEmailSignIn;
         return (data.Session!.Token, data.User!.Id);
     }
+
+    private sealed record GetUserByIdData(GetUserByIdResult? UserById);
+    private sealed record GetUserByIdResult(Guid Id, string? Email);
 
     private sealed record CreateUserData(CreateUserPayload CreateUser);
     private sealed record CreateUserPayload(CreatedUser? User, string? Error);

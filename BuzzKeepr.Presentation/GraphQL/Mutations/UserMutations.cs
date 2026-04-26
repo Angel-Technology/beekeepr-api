@@ -30,8 +30,21 @@ public sealed class UserMutations
     public async Task<CreateUserPayload> CreateUserAsync(
         CreateUserInput input,
         [Service] IUserService userService,
+        [Service] AppApiKeyValidator appApiKeyValidator,
+        [Service] IHttpContextAccessor httpContextAccessor,
         CancellationToken cancellationToken)
     {
+        var httpContext = httpContextAccessor.HttpContext
+            ?? throw new InvalidOperationException("HTTP context is required for createUser.");
+
+        if (!appApiKeyValidator.IsValid(httpContext))
+        {
+            return new CreateUserPayload
+            {
+                Error = "Forbidden: missing or invalid X-App-Api-Key header."
+            };
+        }
+
         var result = await userService.CreateAsync(new ApplicationCreateUserInput
         {
             Email = input.Email,

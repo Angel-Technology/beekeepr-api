@@ -18,10 +18,20 @@ Note: most users are created implicitly by the sign-in flows (`verifyEmailSignIn
 
 | Operation | Type | Input | Output | Auth required |
 | --------- | ---- | ----- | ------ | ------------- |
-| `createUser` | mutation | `email`, `displayName?` | user, error (`EmailRequired`, `EmailAlreadyExists`) | no |
-| `acceptTerms` | mutation | (uses session) | updated user | yes |
-| `getUserById` | query | `id` | user or null | no |
+| `createUser` | mutation | `email`, `displayName?` | user, error | **App key** — `X-App-Api-Key` header must match `Auth:AppApiKey`. If the config value is blank (dev default) the gate is open. |
+| `acceptTerms` | mutation | (uses session) | updated user | yes (session) |
+| `getUserById` | query | `id` | user or null | **Self only** — returns null unless the caller's session matches the requested id. Public-profile lookups for search will get a separate `userProfile`/`searchUsers` query backed by a stripped `UserProfileGraph` (no PII). |
 | `currentUser` | query | (uses session) | user with identity verification status | yes (returns null if no session) |
+
+### Why `createUser` is gated by an app key, not a session
+
+Sign-up doesn't have a session yet — but we don't want anyone on the internet creating arbitrary users (email enumeration, spam accounts, etc.). The shared `Auth:AppApiKey` is embedded in the official frontend app(s), so prod traffic that doesn't carry it is rejected. Dev leaves the key blank so Banana Cake Pop / Strawberry Shake can hit the endpoint without juggling secrets.
+
+For most users, `createUser` won't be the path anyway — `requestEmailSignIn → verifyEmailSignIn` creates the user implicitly on first verify. `createUser` exists for the explicit "set up an account before verification" cases.
+
+### Why `getUserById` is self-only
+
+The full `UserGraph` includes PII (email, verified name parts, DOB, phone, license state). Anyone who could query other users' rows could harvest that data with a guessable id. When search lands, we'll add a separate `userProfile(id)` query that returns a deliberately-narrow `UserProfileGraph` (display name, image, identity-verification badge — no PII). That separation keeps `getUserById` simple and safe.
 
 ## External services
 
