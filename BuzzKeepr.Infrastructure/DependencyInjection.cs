@@ -47,10 +47,19 @@ public static class DependencyInjection
                 "Email:ResendApiKey is required. Set it in user secrets or environment variables.");
         }
 
-        services.AddDbContext<BuzzKeeprDbContext>(options =>
+        services.AddDbContext<BuzzKeeprDbContext>((serviceProvider, options) =>
         {
+            // Resolve options from DI rather than closing over the local `databaseOptions` —
+            // the latter snapshots the connection string at AddInfrastructure call time, which
+            // is BEFORE WebApplicationFactory's ConfigureAppConfiguration overrides apply in
+            // integration tests. Reading via IOptions defers to DbContext-instantiation time,
+            // which is after all config sources are merged.
+            var resolvedDatabaseOptions = serviceProvider
+                .GetRequiredService<IOptions<DatabaseOptions>>()
+                .Value;
+
             options.UseNpgsql(
-                databaseOptions.ConnectionString,
+                resolvedDatabaseOptions.ConnectionString,
                 npgsqlOptions =>
                 {
                     npgsqlOptions.MigrationsAssembly(typeof(BuzzKeeprDbContext).Assembly.FullName);
