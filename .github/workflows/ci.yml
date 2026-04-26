@@ -39,4 +39,15 @@ jobs:
       - name: Integration tests
         # GitHub-hosted ubuntu runners ship with Docker pre-installed,
         # which Testcontainers uses to spin up Postgres for the run.
+        #
+        # The dummy env vars below satisfy the eager validation in
+        # `Infrastructure/DependencyInjection.cs` which fires during
+        # `WebApplication.CreateBuilder(...)` — *before* the test factory's
+        # in-memory config overrides apply. Locally, dotnet user-secrets
+        # provides these; CI has no user-secrets so we stub them here.
+        # The factory's testcontainers connection string still overrides
+        # at host-build time, so tests run against the real container.
+        env:
+          Email__ResendApiKey:           re_test_dummy_key
+          Database__ConnectionString:    Host=ignored;Database=ignored;Username=ignored;Password=ignored
         run: dotnet test BuzzKeepr.IntegrationTests --configuration Release --no-build --verbosity normal

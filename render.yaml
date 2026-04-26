@@ -37,6 +37,7 @@ services:
       - { key: CheckrTrust__RulesetId,        sync: false }
       - { key: Auth__AppApiKey,               sync: false }
       - { key: Sentry__Dsn,                   sync: false }
+      - { key: Sentry__Environment,           sync: false }
       - { key: Cors__AllowedOrigins__0,       sync: false }
 
   - type: web
@@ -69,4 +70,5 @@ services:
       - { key: CheckrTrust__RulesetId,        sync: false }
       - { key: Auth__AppApiKey,               sync: false }
       - { key: Sentry__Dsn,                   sync: false }
+      - { key: Sentry__Environment,           sync: false }
       - { key: Cors__AllowedOrigins__0,       sync: false }
