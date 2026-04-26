@@ -21,8 +21,10 @@ builder.WebHost.UseSentry(options =>
     options.Dsn = builder.Configuration["Sentry:Dsn"] ?? string.Empty;
     // Env tag: explicit Sentry:Environment wins (so the develop Render service can tag events as
     // "develop" while still running ASPNETCORE_ENVIRONMENT=Production). Falls back to .NET's env
-    // name when nothing is configured.
-    options.Environment = builder.Configuration["Sentry:Environment"] ?? builder.Environment.EnvironmentName;
+    // name when nothing is configured. Always lowercased so "Develop"/"develop" don't both show
+    // up as separate environments in Sentry's filter.
+    options.Environment = (builder.Configuration["Sentry:Environment"] ?? builder.Environment.EnvironmentName)
+        .ToLowerInvariant();
     options.Release = typeof(Program).Assembly.GetName().Version?.ToString();
     options.Debug = isDevelopment; // print SDK chatter to console in dev so we can see it phoning home
     options.SendDefaultPii = false;
