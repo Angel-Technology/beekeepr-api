@@ -34,8 +34,11 @@ services:
       - { key: Persona__WebhookSecrets__0,    sync: false }
       - { key: CheckrTrust__ClientId,         sync: false }
       - { key: CheckrTrust__ClientSecret,     sync: false }
-      - { key: CheckrTrust__RulesetId,        sync: false }
+      - { key: CheckrTrust__RulesetIds__0,    sync: false }
+      - { key: CheckrTrust__RulesetIds__1,    sync: false }
       - { key: Auth__AppApiKey,               sync: false }
+      - { key: RevenueCat__SecretApiKey,            sync: false }
+      - { key: RevenueCat__WebhookAuthorizationToken, sync: false }
       - { key: Sentry__Dsn,                   sync: false }
       - { key: Sentry__Environment,           sync: false }
       - { key: Cors__AllowedOrigins__0,       sync: false }
@@ -67,8 +70,11 @@ services:
       - { key: Persona__WebhookSecrets__0,    sync: false }
       - { key: CheckrTrust__ClientId,         sync: false }
       - { key: CheckrTrust__ClientSecret,     sync: false }
-      - { key: CheckrTrust__RulesetId,        sync: false }
+      - { key: CheckrTrust__RulesetIds__0,    sync: false }
+      - { key: CheckrTrust__RulesetIds__1,    sync: false }
       - { key: Auth__AppApiKey,               sync: false }
+      - { key: RevenueCat__SecretApiKey,            sync: false }
+      - { key: RevenueCat__WebhookAuthorizationToken, sync: false }
       - { key: Sentry__Dsn,                   sync: false }
       - { key: Sentry__Environment,           sync: false }
       - { key: Cors__AllowedOrigins__0,       sync: false }

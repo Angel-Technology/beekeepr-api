@@ -1,3 +1,4 @@
+using BuzzKeepr.Application.Billing.Models;
 using BuzzKeepr.Application.Users.Models;
 using BuzzKeepr.Domain.Enums;
 
@@ -22,7 +23,10 @@ public sealed class UserGraph
         VerifiedLicenseState = user.VerifiedLicenseState,
         PhoneNumber = user.PhoneNumber,
         PersonaVerifiedAtUtc = user.PersonaVerifiedAtUtc,
+        BackgroundCheckBadge = user.BackgroundCheckBadge,
+        BackgroundCheckBadgeExpiresAtUtc = user.BackgroundCheckBadgeExpiresAtUtc,
         TermsAcceptedAtUtc = user.TermsAcceptedAtUtc,
+        Subscription = user.Subscription,
         CreatedAtUtc = user.CreatedAtUtc
     };
 
@@ -56,7 +60,13 @@ public sealed class UserGraph
 
     public DateTime? PersonaVerifiedAtUtc { get; init; }
 
+    public BackgroundCheckBadge BackgroundCheckBadge { get; init; } = BackgroundCheckBadge.None;
+
+    public DateTime? BackgroundCheckBadgeExpiresAtUtc { get; init; }
+
     public DateTime? TermsAcceptedAtUtc { get; init; }
+
+    public SubscriptionDto Subscription { get; init; } = new();
 
     public DateTime CreatedAtUtc { get; init; }
 }

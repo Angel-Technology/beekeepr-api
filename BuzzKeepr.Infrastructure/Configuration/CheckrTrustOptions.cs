@@ -10,5 +10,11 @@ public sealed class CheckrTrustOptions
 
     public string ClientSecret { get; init; } = string.Empty;
 
-    public string? RulesetId { get; init; }
+    /// <summary>
+    /// Checkr Trust rulesets to apply on every check. Sent as <c>ruleset_ids</c> in the
+    /// Create Check request body. Multiple rulesets are merged + de-duplicated server-side
+    /// — typical setup is one ruleset per policy slice (e.g. one for felonies all-time,
+    /// another for recent misdemeanors).
+    /// </summary>
+    public string[] RulesetIds { get; init; } = [];
 }

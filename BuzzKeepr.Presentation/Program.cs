@@ -2,8 +2,10 @@ using BuzzKeepr.API.Auth;
 using BuzzKeepr.API.GraphQL.Mutations;
 using BuzzKeepr.API.GraphQL.Queries;
 using BuzzKeepr.Application;
+using BuzzKeepr.Application.Billing;
 using BuzzKeepr.Application.IdentityVerification;
 using BuzzKeepr.Infrastructure;
+using BuzzKeepr.Infrastructure.Billing;
 using BuzzKeepr.Infrastructure.IdentityVerification;
 using BuzzKeepr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -156,6 +158,28 @@ app.MapPost("/webhooks/persona", async (
         return Results.Unauthorized();
 
     await identityVerificationService.ProcessPersonaWebhookAsync(rawRequestBody, cancellationToken);
+
+    return Results.NoContent();
+});
+
+app.MapPost("/webhooks/revenuecat", async (
+    HttpContext httpContext,
+    RevenueCatWebhookAuthorizer authorizer,
+    IBillingService billingService,
+    CancellationToken cancellationToken) =>
+{
+    httpContext.Request.EnableBuffering();
+
+    using var reader = new StreamReader(httpContext.Request.Body, leaveOpen: true);
+    var rawRequestBody = await reader.ReadToEndAsync(cancellationToken);
+    httpContext.Request.Body.Position = 0;
+
+    var authorizationHeader = httpContext.Request.Headers.Authorization.ToString();
+
+    if (!authorizer.IsValid(authorizationHeader))
+        return Results.Unauthorized();
+
+    await billingService.ProcessRevenueCatWebhookAsync(rawRequestBody, cancellationToken);
 
     return Results.NoContent();
 });

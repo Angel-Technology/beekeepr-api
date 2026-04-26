@@ -1,4 +1,5 @@
 using BuzzKeepr.Infrastructure.Auth;
+using BuzzKeepr.Infrastructure.Billing;
 using BuzzKeepr.Infrastructure.Configuration;
 using BuzzKeepr.Infrastructure.IdentityVerification;
 using BuzzKeepr.Infrastructure.Persistence;
@@ -37,6 +38,8 @@ public static class DependencyInjection
             configuration.GetSection(PersonaOptions.SectionName));
         services.Configure<CheckrTrustOptions>(
             configuration.GetSection(CheckrTrustOptions.SectionName));
+        services.Configure<RevenueCatOptions>(
+            configuration.GetSection(RevenueCatOptions.SectionName));
 
         var emailOptions = configuration
             .GetSection(EmailDeliveryOptions.SectionName)
@@ -88,6 +91,15 @@ public static class DependencyInjection
             if (Uri.TryCreate(checkrTrustOptions.ApiBaseUrl, UriKind.Absolute, out var baseUri))
                 httpClient.BaseAddress = baseUri;
         });
+        services.AddHttpClient<RevenueCatClient>((serviceProvider, httpClient) =>
+        {
+            var revenueCatOptions = serviceProvider
+                .GetRequiredService<IOptions<RevenueCatOptions>>()
+                .Value;
+
+            if (Uri.TryCreate(revenueCatOptions.ApiBaseUrl, UriKind.Absolute, out var baseUri))
+                httpClient.BaseAddress = baseUri;
+        });
         services.AddScoped<Application.Auth.IGoogleTokenVerifier, GoogleTokenVerifier>();
         services.AddScoped<Application.Auth.IEmailSignInSender, ResendEmailSignInSender>();
         services.AddScoped<Application.Users.IWelcomeEmailSender, ResendWelcomeEmailSender>();
@@ -96,9 +108,13 @@ public static class DependencyInjection
         services.AddScoped<Application.IdentityVerification.ICheckrTrustClient, CheckrTrustClient>();
         services.AddScoped<Application.IdentityVerification.IPersonaClient, PersonaClient>();
         services.AddScoped<Application.Users.IUserRepository, UserRepository>();
+        services.AddScoped<Application.Billing.IBillingRepository, BillingRepository>();
+        services.AddScoped<Application.Billing.IRevenueCatClient, RevenueCatClient>();
         services.AddScoped<PersonaWebhookSignatureVerifier>();
+        services.AddScoped<RevenueCatWebhookAuthorizer>();
         services.AddHostedService<Auth.SessionCleanupBackgroundService>();
         services.AddHostedService<Auth.WelcomeEmailSweeperBackgroundService>();
+        services.AddHostedService<IdentityVerification.BackgroundCheckRenewalBackgroundService>();
 
         return services;
     }

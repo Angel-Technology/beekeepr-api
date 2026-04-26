@@ -195,8 +195,11 @@ public sealed class CheckrTrustClient(
             ["check_type"] = "instant_criminal"
         };
 
-        if (!string.IsNullOrWhiteSpace(options.RulesetId))
-            body["ruleset_id"] = options.RulesetId;
+        var configuredRulesetIds = options.RulesetIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .ToArray();
+        if (configuredRulesetIds.Length > 0)
+            body["ruleset_ids"] = configuredRulesetIds;
 
         if (!string.IsNullOrWhiteSpace(input.ProfileId))
         {

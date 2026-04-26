@@ -14,5 +14,7 @@ public sealed class StartPersonaInquiryResult
 
     public PersonaInquiryStatus? PersonaInquiryStatus { get; init; }
 
+    public bool SubscriptionRequired { get; init; }
+
     public string? Error { get; init; }
 }

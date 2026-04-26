@@ -1,5 +1,6 @@
 using System.Text.Json;
 using BuzzKeepr.Application.IdentityVerification.Models;
+using BuzzKeepr.Domain.Enums;
 using BuzzKeepr.Infrastructure.Persistence;
 using BuzzKeepr.IntegrationTests.Common;
 using Microsoft.EntityFrameworkCore;
@@ -77,6 +78,39 @@ public sealed class CheckrTrustTests(PostgresFixture postgres) : IAsyncLifetime
         var user = await dbContext.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
         Assert.Equal("prf_first", user.CheckrProfileId);
         Assert.Equal("chk_first", user.CheckrLastCheckId);
+        Assert.Equal(BackgroundCheckBadge.Approved, user.BackgroundCheckBadge);
+        var expectedExpiry = DateTime.UtcNow.AddMonths(3);
+        Assert.NotNull(user.BackgroundCheckBadgeExpiresAtUtc);
+        Assert.InRange(user.BackgroundCheckBadgeExpiresAtUtc!.Value,
+            expectedExpiry.AddMinutes(-1), expectedExpiry.AddMinutes(1));
+    }
+
+    [Fact]
+    public async Task StartInstantCriminalCheck_WhenCheckrReportsMatches_StampsDeniedBadge()
+    {
+        factory.FakeCheckrTrust.NextResult = new CreateInstantCriminalCheckResult
+        {
+            Success = true,
+            CheckId = "chk_dirty",
+            ProfileId = "prf_dirty",
+            ResultCount = 2,
+            HasPossibleMatches = true
+        };
+
+        var (token, userId) = await SignInAsync();
+        await SeedVerifiedIdentityAsync(userId);
+        var http = factory.CreateClient();
+        http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        var graphql = new GraphQLClient(http);
+
+        await graphql.SendAsync<StartCheckData>(
+            "mutation { startInstantCriminalCheck(input: {}) { success error } }");
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
+        var user = await dbContext.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
+        Assert.Equal(BackgroundCheckBadge.Denied, user.BackgroundCheckBadge);
+        Assert.NotNull(user.BackgroundCheckBadgeExpiresAtUtc);
     }
 
     [Fact]

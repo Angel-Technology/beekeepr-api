@@ -145,6 +145,8 @@ The class name is the *thing under test* (`SessionTests`, `EmailSignInTests`); t
 
 8. **Coverage isn't a goal.** Confidence is. A 100%-covered file with all-path tests is worse than a 60%-covered file where the integration tests exercise the real flows.
 
+   That said, **coverage as visibility is useful**. Our CI workflow (`.github/workflows/ci.yml`) emits a coverage summary (via `reportgenerator` over coverlet's cobertura output) into the GitHub Actions run page on every push and PR. It's there to catch *dark code* — files with zero tests at all, or files that have dropped a chunk of coverage — not to enforce a percentage. **No PR-blocking gate**. If coverage on a meaningful file drops to zero, we have a discussion; we don't fail the build because a number moved.
+
 ---
 
 ## Running tests

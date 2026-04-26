@@ -46,7 +46,7 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
             LicenseState = "ca"
         };
 
-        var (token, userId) = await SignInAsync();
+        var (token, userId, _) = await SignInAsync();
         var http = factory.CreateClient();
         http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
         var graphql = new GraphQLClient(http);
@@ -75,6 +75,49 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Webhook_ApprovedInquiryForEmailSignInUser_TriggersDeferredWelcomeWithVerifiedFirstName()
+    {
+        const string inquiryId = "inq_persona_deferred_welcome";
+        factory.FakePersona.NextCreateInquiryResult = new CreatePersonaInquiryResult
+        {
+            Success = true,
+            InquiryId = inquiryId,
+            InquiryStatus = "created"
+        };
+        factory.FakePersona.NextGovernmentIdDataResult = new PersonaGovernmentIdDataResult
+        {
+            Success = true,
+            FirstName = "Sienna",
+            LastName = "Park",
+            Birthdate = "1992-05-12",
+            LicenseState = "ny"
+        };
+
+        var (token, userId, email) = await SignInAsync();
+
+        Assert.DoesNotContain(factory.FakeWelcomeSender.Sent, w => w.Email == email);
+
+        var http = factory.CreateClient();
+        http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        var graphql = new GraphQLClient(http);
+
+        await graphql.SendAsync<JsonElement>(
+            "mutation { startPersonaInquiry { success error } }");
+
+        var webhookBody = BuildInquiryWebhookBody(inquiryId, "approved");
+        var webhookResponse = await PostWebhookAsync(webhookBody, BuildSignatureHeader(WebhookSecret, webhookBody));
+        Assert.Equal(HttpStatusCode.NoContent, webhookResponse.StatusCode);
+
+        var welcome = factory.FakeWelcomeSender.Sent.Single(w => w.Email == email);
+        Assert.Equal("Sienna", welcome.DisplayName);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
+        var user = await dbContext.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
+        Assert.NotNull(user.WelcomeEmailSentAtUtc);
+    }
+
+    [Fact]
     public async Task StartPersonaInquiry_ReusesPendingInquiry_RecreatesAfterRetryableStatus()
     {
         factory.FakePersona.NextCreateInquiryResult = new CreatePersonaInquiryResult
@@ -84,7 +127,7 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
             InquiryStatus = "pending"
         };
 
-        var (token, userId) = await SignInAsync();
+        var (token, userId, _) = await SignInAsync();
         var http = factory.CreateClient();
         http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
         var graphql = new GraphQLClient(http);
@@ -145,7 +188,7 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
             LastName = "User"
         };
 
-        var (token, userId) = await SignInAsync();
+        var (token, userId, _) = await SignInAsync();
         var http = factory.CreateClient();
         http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
         var graphql = new GraphQLClient(http);
@@ -174,6 +217,133 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task StartPersonaInquiry_WithoutActiveSubscription_BlocksAndReturnsSubscriptionRequired()
+    {
+        var (token, _, _) = await SignInAsync(withActiveSubscription: false);
+        var http = factory.CreateClient();
+        http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        var graphql = new GraphQLClient(http);
+
+        var response = await graphql.SendAsync<StartInquiryData>(
+            "mutation { startPersonaInquiry { success createdNewInquiry inquiryId error subscriptionRequired } }");
+
+        var payload = response.RequireData().StartPersonaInquiry;
+        Assert.False(payload.Success);
+        Assert.True(payload.SubscriptionRequired);
+        Assert.Equal("Active subscription required to start identity verification.", payload.Error);
+        Assert.Empty(factory.FakePersona.CreateInquiryCalls);
+    }
+
+    [Fact]
+    public async Task StartPersonaInquiry_WithActiveSubscription_CreatesInquiry()
+    {
+        factory.FakePersona.NextCreateInquiryResult = new CreatePersonaInquiryResult
+        {
+            Success = true,
+            InquiryId = "inq_gated_pass",
+            InquiryStatus = "created"
+        };
+
+        var (token, _, _) = await SignInAsync(); // default: subscription seeded as active
+        var http = factory.CreateClient();
+        http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        var graphql = new GraphQLClient(http);
+
+        var response = await graphql.SendAsync<StartInquiryData>(
+            "mutation { startPersonaInquiry { success createdNewInquiry inquiryId error subscriptionRequired } }");
+
+        var payload = response.RequireData().StartPersonaInquiry;
+        Assert.True(payload.Success);
+        Assert.False(payload.SubscriptionRequired);
+        Assert.Null(payload.Error);
+        Assert.Equal("inq_gated_pass", payload.InquiryId);
+        Assert.Single(factory.FakePersona.CreateInquiryCalls);
+    }
+
+    [Fact]
+    public async Task StartPersonaInquiry_ReuseExistingInquiry_BypassesSubscriptionGate()
+    {
+        // Seed a user who already has a Persona inquiry in a non-retryable state. Even with no
+        // subscription, they should be able to fetch the existing inquiry's status — we only gate
+        // the path that would actually create a new (paid) inquiry.
+        factory.FakePersona.NextCreateInquiryResult = new CreatePersonaInquiryResult
+        {
+            Success = true,
+            InquiryId = "inq_existing",
+            InquiryStatus = "pending"
+        };
+
+        var (token, userId, _) = await SignInAsync(); // start with active sub so we can create
+        var http = factory.CreateClient();
+        http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        var graphql = new GraphQLClient(http);
+
+        await graphql.SendAsync<StartInquiryData>(
+            "mutation { startPersonaInquiry { success } }");
+        Assert.Single(factory.FakePersona.CreateInquiryCalls);
+
+        // Now lapse the subscription. The existing inquiry should still be reachable.
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
+            await dbContext.Users
+                .Where(u => u.Id == userId)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(u => u.SubscriptionStatus, SubscriptionStatus.Expired));
+        }
+
+        var reuse = await graphql.SendAsync<StartInquiryData>(
+            "mutation { startPersonaInquiry { success createdNewInquiry inquiryId subscriptionRequired error } }");
+
+        var payload = reuse.RequireData().StartPersonaInquiry;
+        Assert.True(payload.Success);
+        Assert.False(payload.CreatedNewInquiry);
+        Assert.False(payload.SubscriptionRequired);
+        Assert.Equal("inq_existing", payload.InquiryId);
+        Assert.Single(factory.FakePersona.CreateInquiryCalls); // no second call
+    }
+
+    [Fact]
+    public async Task StartPersonaInquiry_RetryAfterFailedInquiry_RequiresActiveSubscription()
+    {
+        // Seed a user with a Failed inquiry (retryable status) and no active sub. A retry attempt
+        // would burn a fresh Persona call, so the gate fires.
+        factory.FakePersona.NextCreateInquiryResult = new CreatePersonaInquiryResult
+        {
+            Success = true,
+            InquiryId = "inq_first_attempt",
+            InquiryStatus = "pending"
+        };
+
+        var (token, userId, _) = await SignInAsync();
+        var http = factory.CreateClient();
+        http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        var graphql = new GraphQLClient(http);
+
+        await graphql.SendAsync<StartInquiryData>(
+            "mutation { startPersonaInquiry { success } }");
+
+        // Mark the inquiry as Failed and lapse the subscription.
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
+            await dbContext.Users
+                .Where(u => u.Id == userId)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(u => u.IdentityVerificationStatus, IdentityVerificationStatus.Failed)
+                    .SetProperty(u => u.SubscriptionStatus, SubscriptionStatus.Expired));
+        }
+
+        var retry = await graphql.SendAsync<StartInquiryData>(
+            "mutation { startPersonaInquiry { success createdNewInquiry inquiryId subscriptionRequired error } }");
+
+        var payload = retry.RequireData().StartPersonaInquiry;
+        Assert.False(payload.Success);
+        Assert.True(payload.SubscriptionRequired);
+        Assert.Single(factory.FakePersona.CreateInquiryCalls); // no second Persona call attempted
+    }
+
+    [Fact]
     public async Task Webhook_WithInvalidSignature_Returns401AndDoesNotMutateUser()
     {
         const string inquiryId = "inq_persona_unauthorized";
@@ -184,7 +354,7 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
             InquiryStatus = "created"
         };
 
-        var (token, userId) = await SignInAsync();
+        var (token, userId, _) = await SignInAsync();
         var http = factory.CreateClient();
         http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
         var graphql = new GraphQLClient(http);
@@ -254,7 +424,7 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
         return $"t={timestamp},v1={hex}";
     }
 
-    private async Task<(string Token, Guid UserId)> SignInAsync()
+    private async Task<(string Token, Guid UserId, string Email)> SignInAsync(bool withActiveSubscription = true)
     {
         var email = $"persona-{Guid.NewGuid():N}@buzzkeepr.test";
         var http = factory.CreateClient();
@@ -268,11 +438,30 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
             "mutation($input: VerifyEmailSignInInput!) { verifyEmailSignIn(input: $input) { user { id } session { token } } }",
             new { input = new { email, code } });
         var data = verify.RequireData().VerifyEmailSignIn;
-        return (data.Session!.Token, data.User!.Id);
+
+        if (withActiveSubscription)
+            await SeedActiveSubscriptionAsync(data.User!.Id);
+
+        return (data.Session!.Token, data.User!.Id, email);
+    }
+
+    private async Task SeedActiveSubscriptionAsync(Guid userId)
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
+        await dbContext.Users
+            .Where(u => u.Id == userId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(u => u.SubscriptionStatus, SubscriptionStatus.Trialing)
+                .SetProperty(u => u.SubscriptionEntitlement, "premium")
+                .SetProperty(u => u.SubscriptionProductId, "premium_monthly")
+                .SetProperty(u => u.SubscriptionStore, (SubscriptionStore?)SubscriptionStore.AppStore)
+                .SetProperty(u => u.SubscriptionCurrentPeriodEndUtc, (DateTime?)DateTime.UtcNow.AddDays(7))
+                .SetProperty(u => u.SubscriptionWillRenew, (bool?)true));
     }
 
     private sealed record StartInquiryData(StartInquiryPayload StartPersonaInquiry);
-    private sealed record StartInquiryPayload(bool Success, bool CreatedNewInquiry, string? InquiryId, string? Error);
+    private sealed record StartInquiryPayload(bool Success, bool CreatedNewInquiry, string? InquiryId, string? Error, bool SubscriptionRequired);
 
     private sealed record VerifyData(VerifyPayload VerifyEmailSignIn);
     private sealed record VerifyPayload(VerifyUser? User, VerifySession? Session);

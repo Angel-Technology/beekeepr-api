@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using BuzzKeepr.Application.Auth.Models;
+using BuzzKeepr.Application.Billing.Models;
 using BuzzKeepr.Application.IdentityVerification;
 using BuzzKeepr.Application.Users;
 using BuzzKeepr.Application.Users.Models;
@@ -111,8 +112,16 @@ public sealed class AuthService(
                 verificationToken.ExpiresAtUtc,
                 cancellationToken);
         }
-        catch
+        catch (Exception exception)
         {
+            // Log the full exception so the actual Resend response body (carried in the
+            // InvalidOperationException's message — e.g. unverified-from, invalid template id,
+            // recipient not allowed on free tier) is visible in console + Sentry. Without this
+            // the caller only sees a generic "Email delivery failed" and has to guess.
+            logger.LogWarning(
+                exception,
+                "Failed to send sign-in code to {Email} via Resend.",
+                normalizedEmail);
             return new RequestEmailSignInResult
             {
                 EmailDeliveryFailed = true
@@ -207,7 +216,10 @@ public sealed class AuthService(
         await authRepository.AddSessionAsync(session, cancellationToken);
         await authRepository.SaveChangesAsync(cancellationToken);
 
-        if (isNewUser)
+        // Email sign-in users have no display name yet — sending a welcome here would render
+        // "Welcome to BuzzKeepr, there." Defer until we have a name (Persona webhook will
+        // trigger the welcome with verifiedFirstName when verification approves).
+        if (isNewUser && !string.IsNullOrWhiteSpace(user.DisplayName))
             await TrySendWelcomeAsync(user, cancellationToken);
 
         return new VerifyEmailSignInResult
@@ -384,7 +396,10 @@ public sealed class AuthService(
             VerifiedLicenseState = user.VerifiedLicenseState,
             PhoneNumber = user.PhoneNumber,
             PersonaVerifiedAtUtc = user.PersonaVerifiedAtUtc,
+            BackgroundCheckBadge = user.BackgroundCheckBadge,
+            BackgroundCheckBadgeExpiresAtUtc = user.BackgroundCheckBadgeExpiresAtUtc,
             TermsAcceptedAtUtc = user.TermsAcceptedAtUtc,
+            Subscription = SubscriptionDto.FromUser(user),
             CreatedAtUtc = user.CreatedAtUtc
         };
     }

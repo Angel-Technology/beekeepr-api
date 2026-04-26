@@ -21,7 +21,7 @@ public sealed class WelcomeEmailTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task EmailSignIn_NewUser_SendsWelcomeAndStampsTimestamp()
+    public async Task EmailSignIn_NewUser_DefersWelcomeUntilNameAvailable()
     {
         var email = $"welcome-email-{Guid.NewGuid():N}@buzzkeepr.test";
         var graphql = new GraphQLClient(factory.CreateClient());
@@ -35,12 +35,12 @@ public sealed class WelcomeEmailTests(PostgresFixture postgres) : IAsyncLifetime
             new { input = new { email, code } });
         var userId = verify.RequireData().VerifyEmailSignIn.User!.Id;
 
-        Assert.Contains(factory.FakeWelcomeSender.Sent, w => w.Email == email);
+        Assert.DoesNotContain(factory.FakeWelcomeSender.Sent, w => w.Email == email);
 
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
         var user = await dbContext.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
-        Assert.NotNull(user.WelcomeEmailSentAtUtc);
+        Assert.Null(user.WelcomeEmailSentAtUtc);
     }
 
     [Fact]
@@ -112,23 +112,19 @@ public sealed class WelcomeEmailTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task EmailSignIn_WhenWelcomeSendFails_LeavesTimestampNullForSweeper()
+    public async Task CreateUser_WhenWelcomeSendFails_LeavesTimestampNullForSweeper()
     {
         factory.FakeWelcomeSender.FailNextSendsWith(new InvalidOperationException("resend down"));
 
         var email = $"welcome-fail-{Guid.NewGuid():N}@buzzkeepr.test";
         var graphql = new GraphQLClient(factory.CreateClient());
 
-        await graphql.SendAsync<JsonElement>(
-            "mutation($input: RequestEmailSignInInput!) { requestEmailSignIn(input: $input) { success } }",
-            new { input = new { email } });
-        var code = factory.FakeEmailSender.RequireLatestFor(email).Code;
-        var verify = await graphql.SendAsync<VerifyData>(
-            "mutation($input: VerifyEmailSignInInput!) { verifyEmailSignIn(input: $input) { user { id email } error } }",
-            new { input = new { email, code } });
+        var create = await graphql.SendAsync<CreateUserData>(
+            "mutation($input: CreateUserInput!) { createUser(input: $input) { user { id } error } }",
+            new { input = new { email, displayName = "Failing Welcome" } });
 
-        Assert.Null(verify.RequireData().VerifyEmailSignIn.Error);
-        var userId = verify.RequireData().VerifyEmailSignIn.User!.Id;
+        Assert.Null(create.RequireData().CreateUser.Error);
+        var userId = create.RequireData().CreateUser.User!.Id;
 
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();

@@ -3,6 +3,7 @@ using System;
 using BuzzKeepr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace BuzzKeepr.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(BuzzKeeprDbContext))]
-    partial class BuzzKeeprDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260426173949_AddBackgroundCheckBadge")]
+    partial class AddBackgroundCheckBadge
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -179,38 +182,6 @@ namespace BuzzKeepr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
 
-                    b.Property<string>("RevenueCatAppUserId")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<DateTime?>("SubscriptionCurrentPeriodEndUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("SubscriptionEntitlement")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("SubscriptionProductId")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<string>("SubscriptionStatus")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)")
-                        .HasDefaultValue("None");
-
-                    b.Property<string>("SubscriptionStore")
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<DateTime?>("SubscriptionUpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool?>("SubscriptionWillRenew")
-                        .HasColumnType("boolean");
-
                     b.Property<DateTime?>("TermsAcceptedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -246,9 +217,6 @@ namespace BuzzKeepr.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.HasIndex("PersonaInquiryId")
-                        .IsUnique();
-
-                    b.HasIndex("RevenueCatAppUserId")
                         .IsUnique();
 
                     b.ToTable("Users");

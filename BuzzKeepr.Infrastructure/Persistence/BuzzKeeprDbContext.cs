@@ -71,11 +71,45 @@ public sealed class BuzzKeeprDbContext(DbContextOptions<BuzzKeeprDbContext> opti
             builder.Property(user => user.CheckrLastCheckAtUtc)
                 .HasColumnType("timestamp with time zone");
 
+            builder.Property(user => user.BackgroundCheckBadge)
+                .HasConversion<string>()
+                .HasMaxLength(50)
+                .HasDefaultValue(BackgroundCheckBadge.None)
+                .IsRequired();
+
+            builder.Property(user => user.BackgroundCheckBadgeExpiresAtUtc)
+                .HasColumnType("timestamp with time zone");
+
             builder.Property(user => user.TermsAcceptedAtUtc)
                 .HasColumnType("timestamp with time zone");
 
             builder.Property(user => user.WelcomeEmailSentAtUtc)
                 .HasColumnType("timestamp with time zone");
+
+            builder.Property(user => user.SubscriptionStatus)
+                .HasConversion<string>()
+                .HasMaxLength(50)
+                .HasDefaultValue(SubscriptionStatus.None)
+                .IsRequired();
+
+            builder.Property(user => user.SubscriptionEntitlement)
+                .HasMaxLength(100);
+
+            builder.Property(user => user.SubscriptionProductId)
+                .HasMaxLength(200);
+
+            builder.Property(user => user.SubscriptionStore)
+                .HasConversion<string>()
+                .HasMaxLength(50);
+
+            builder.Property(user => user.SubscriptionCurrentPeriodEndUtc)
+                .HasColumnType("timestamp with time zone");
+
+            builder.Property(user => user.SubscriptionUpdatedAtUtc)
+                .HasColumnType("timestamp with time zone");
+
+            builder.Property(user => user.RevenueCatAppUserId)
+                .HasMaxLength(200);
 
             builder.HasIndex(user => user.Email)
                 .IsUnique();
@@ -84,6 +118,9 @@ public sealed class BuzzKeeprDbContext(DbContextOptions<BuzzKeeprDbContext> opti
                 .IsUnique();
 
             builder.HasIndex(user => user.CheckrProfileId)
+                .IsUnique();
+
+            builder.HasIndex(user => user.RevenueCatAppUserId)
                 .IsUnique();
         });
 

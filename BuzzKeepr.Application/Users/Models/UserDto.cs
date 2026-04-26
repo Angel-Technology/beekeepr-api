@@ -1,3 +1,4 @@
+using BuzzKeepr.Application.Billing.Models;
 using BuzzKeepr.Domain.Enums;
 
 namespace BuzzKeepr.Application.Users.Models;
@@ -34,7 +35,13 @@ public sealed class UserDto
 
     public DateTime? PersonaVerifiedAtUtc { get; init; }
 
+    public BackgroundCheckBadge BackgroundCheckBadge { get; init; } = BackgroundCheckBadge.None;
+
+    public DateTime? BackgroundCheckBadgeExpiresAtUtc { get; init; }
+
     public DateTime? TermsAcceptedAtUtc { get; init; }
+
+    public SubscriptionDto Subscription { get; init; } = new();
 
     public DateTime CreatedAtUtc { get; init; }
 }
