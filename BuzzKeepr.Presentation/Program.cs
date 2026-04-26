@@ -14,6 +14,20 @@ var port = Environment.GetEnvironmentVariable("PORT");
 var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
 var isDevelopment = builder.Environment.IsDevelopment();
 
+// Sentry: stays a no-op when Sentry:Dsn is blank (the dev default), so this can run in any env.
+// Sentry's SDK throws ArgumentNullException on null Dsn but treats empty string as "disabled".
+builder.WebHost.UseSentry(options =>
+{
+    options.Dsn = builder.Configuration["Sentry:Dsn"] ?? string.Empty;
+    options.Environment = builder.Environment.EnvironmentName;
+    options.Release = typeof(Program).Assembly.GetName().Version?.ToString();
+    options.Debug = isDevelopment; // print SDK chatter to console in dev so we can see it phoning home
+    options.SendDefaultPii = false;
+    options.MaxRequestBodySize = Sentry.Extensibility.RequestSize.None; // GraphQL bodies contain emails / verification codes
+    options.TracesSampleRate = isDevelopment ? 1.0 : 0.1;
+    options.AttachStacktrace = true;
+});
+
 if (!string.IsNullOrWhiteSpace(port))
     builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 
@@ -63,6 +77,7 @@ builder.Services
     {
         options.IncludeExceptionDetails = isDevelopment;
     })
+    .AddDiagnosticEventListener<BuzzKeepr.API.GraphQL.SentryGraphQLDiagnosticListener>()
     .AddQueryType<UserQueries>()
     .AddMutationType<UserMutations>();
 
