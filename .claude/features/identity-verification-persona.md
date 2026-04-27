@@ -1,6 +1,6 @@
 # Feature: Identity Verification — Persona
 
-Status: **Working end-to-end with async-aware webhook handling.** Inquiry creation, signature verification, out-of-order tolerance, idempotency, and verified-data persistence are wired up.
+Status: **Complete.** Inquiry creation, signature verification, out-of-order tolerance, idempotency, verified-data persistence, deferred-welcome trigger, and integration tests are all in place.
 
 ## What it does
 
@@ -23,10 +23,23 @@ Persona runs OCR / face-match / liveness / watchlist
 
 Backend behavior at each stage:
 
-1. `startPersonaInquiry` (GraphQL mutation) — backend either creates a fresh inquiry on Persona (`inq_…`) or reuses an existing in-progress one if it's in a retryable state.
+1. `startPersonaInquiry` (GraphQL mutation) — backend either creates a fresh inquiry on Persona (`inq_…`) or reuses an existing in-progress one if it's in a retryable state. **Subscription gate** fires here on the create-new-inquiry path — see below.
 2. Frontend opens the Persona SDK with the returned `inquiryId`. Backend has no involvement until the webhooks land.
 3. Persona POSTs to `/webhooks/persona` for each status transition. Backend verifies the HMAC signature, checks the event isn't stale (timestamp comparison), maps the status, and persists.
 4. On `Completed` or `Approved` (whichever lands first with verified data not yet present), backend fetches government-ID data from Persona and persists `verified_*` fields plus `persona_verified_at_utc`.
+
+## Subscription gate
+
+`startPersonaInquiry` is the **first paid surface in the funnel**. Before we'd burn a Persona inquiry call (fresh or retry), `IdentityVerificationService` calls `IBillingService.GetSubscriptionForUserAsync(userId)` and rejects with `subscriptionRequired: true` if `IsActive` is false.
+
+Rules:
+
+- **Fires on `shouldCreateNewInquiry == true`:** initial attempt OR retry after `Declined`/`Expired`/`Failed`. Both paths cost us a Persona call.
+- **Bypasses on existing in-progress inquiries:** if the user has an inquiry in `Created`/`Pending`/`Completed`/`Approved`/`NeedsReview`, they can keep fetching its status (free reuse path) even if their sub has lapsed mid-flow. They've already spent the inquiry; don't lock them out of seeing how it ended.
+- **REST fallback:** `GetSubscriptionForUserAsync` falls back to a live RevenueCat `GET /v1/subscribers/{appUserId}` when the local mirror says inactive — protects users who just paid but whose webhook hasn't landed yet.
+- **Conservative on RevenueCat outage:** if REST also fails or returns no entitlement, the gate blocks. Better to delay one user's KYC by a few minutes than let through unpaid runs.
+
+Frontend should branch on `subscriptionRequired` (typed boolean), not on the `error` string. When true, route to the paywall.
 
 ## Database tables
 
@@ -53,7 +66,7 @@ Everything lives directly on `users`. Migrations:
 
 | Operation | Type | Input | Output | Auth required |
 | --------- | ---- | ----- | ------ | ------------- |
-| `startPersonaInquiry` | mutation | (uses session) | `inquiry_id`, `identity_verification_status`, `persona_inquiry_status`, `created_new_inquiry` | yes |
+| `startPersonaInquiry` | mutation | (uses session) | `inquiry_id`, `identity_verification_status`, `persona_inquiry_status`, `created_new_inquiry`, `subscription_required` | yes |
 | `currentUser` | query | (uses session) | includes identity-verification status fields + verified-data fields | yes |
 
 ## REST surface (webhooks)
@@ -110,6 +123,14 @@ Our handler defends against both via a **monotonic watermark**:
 - Otherwise we apply the new status and bump the watermark.
 
 We also avoid re-fetching verified data if it's already persisted (`verified_first_name` non-null) — this prevents the `completed → approved` transition from making a second `GET /verifications/government-id/...` call to Persona.
+
+### Side effect: deferred welcome email
+
+Email-sign-in users have no display name when their `User` row is created, so the welcome email is intentionally deferred (see `.claude/features/authentication-email-signin.md` → "Welcome email — name-gated, hybrid trigger"). Persona is the trigger that resolves the deferral.
+
+After persisting the verified data, `ProcessPersonaWebhookAsync` checks `WelcomeEmailSentAtUtc IS NULL && VerifiedFirstName != null` and calls `TrySendDeferredWelcomeAsync`, which sends through `IWelcomeEmailSender` using the verified first name and stamps `WelcomeEmailSentAtUtc`. Failure is swallowed and logged — the sweeper picks it up next pass.
+
+Google sign-in users and `createUser` consumers already have a name, so they bypass this path entirely (welcome was already sent inline at user creation).
 
 ### Frontend UX guidance
 

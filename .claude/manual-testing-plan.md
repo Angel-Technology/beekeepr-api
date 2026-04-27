@@ -182,8 +182,12 @@ Backdate the session's `LastSeenAtUtc` to simulate 25 hours of activity gap. In 
 ```sql
 docker compose exec postgres psql -U postgres -d buzzkeepr_dev
 
--- Get your raw token's hash
-SELECT encode(digest('<your raw token>', 'sha256'), 'hex') AS hash;
+-- One-time per database: enable pgcrypto so we can compute SHA-256 in SQL.
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- Get your raw token's hash. The upper() matters — our HashToken returns
+-- UPPERCASE hex via Convert.ToHexString, but encode(..., 'hex') returns lowercase.
+SELECT upper(encode(digest('<your raw token>', 'sha256'), 'hex')) AS hash;
 
 -- Backdate using that hash
 UPDATE "Sessions"
@@ -218,11 +222,24 @@ curl -i -X POST http://localhost:5158/graphql \
 
 ### 8.2 Same call + allowed Origin → passes
 
-Add `-H 'Origin: http://localhost:3000'`. **Expect**: 200.
+```bash
+curl -i -X POST http://localhost:5158/graphql \
+  -H 'Content-Type: application/json' \
+  -H 'Origin: http://localhost:3000' \
+  -H 'Cookie: buzzkeepr_session=<your-token>' \
+  -d '{"query":"query { currentUser { id } }"}'
+```
+**Expect**: 200 with the user object.
 
-### 8.3 Same call + Bearer (no Origin) → passes
+### 8.3 Same call + Bearer (no Cookie, no Origin) → passes
 
-Replace `Cookie` with `-H 'Authorization: Bearer <token>'`. **Expect**: 200.
+```bash
+curl -i -X POST http://localhost:5158/graphql \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <your-token>' \
+  -d '{"query":"query { currentUser { id } }"}'
+```
+**Expect**: 200. Bearer auth is CSRF-immune by design — no cookie means no CSRF check fires at all.
 
 ---
 
@@ -298,30 +315,130 @@ mutation { signInWithGoogle(input: { idToken: "eyJh..." }) {
 
 (Make sure you're signed in with a bearer token.)
 
+### 12a. Subscription gate (negative case — run this first)
+
+A fresh user has no active subscription, so the gate should block. Before doing anything else:
+
 ```graphql
 mutation { startPersonaInquiry {
-  success createdNewInquiry inquiryId identityVerificationStatus personaInquiryStatus error
+  success createdNewInquiry inquiryId subscriptionRequired error
 } }
 ```
-**Expect**: `inquiryId` is `inq_…`, `createdNewInquiry: true`, `identityVerificationStatus: CREATED` or `PENDING`.
 
-Run it again immediately → `createdNewInquiry: false`, **same inquiryId** (reuse path).
+**Expect**: `success: false`, `subscriptionRequired: true`, `error: "Active subscription required to start identity verification."` Persona dashboard shows **no** new inquiry — the gate blocked before any Persona call.
+
+### 12b. Mark the user as subscribed and retry
+
+To unblock without going through the actual RevenueCat purchase loop, fire a synthetic `INITIAL_PURCHASE` webhook (see phase 16.6a) — that flips `SubscriptionStatus` to `Trialing`, which is enough to satisfy the gate.
+
+Or, for a quick local hack:
+
+```sql
+UPDATE "Users"
+SET "SubscriptionStatus" = 'Trialing',
+    "SubscriptionEntitlement" = 'premium',
+    "SubscriptionProductId" = 'premium_monthly',
+    "SubscriptionStore" = 'AppStore',
+    "SubscriptionCurrentPeriodEndUtc" = now() + interval '7 days',
+    "SubscriptionWillRenew" = true
+WHERE "Email" = 'you@example.com';
+```
+
+### 12c. Now create the inquiry
+
+```graphql
+mutation { startPersonaInquiry {
+  success createdNewInquiry inquiryId identityVerificationStatus personaInquiryStatus error subscriptionRequired
+} }
+```
+**Expect**: `inquiryId` is `inq_…`, `createdNewInquiry: true`, `subscriptionRequired: false`, `identityVerificationStatus: CREATED` or `PENDING`.
+
+Run it again immediately → `createdNewInquiry: false`, **same inquiryId** (reuse path — works even if you re-`UPDATE` the sub back to `Expired` first, since reuse bypasses the gate).
 
 ---
 
-## 13. Persona — webhook flow (via simulator)
+## 13. Persona — webhook flow
 
-In the Persona dashboard, find the webhook simulator for the inquiry created in step 12. Two flavors of simulator:
+There are **two distinct things to verify** here, and both matter:
 
-- **"Send to your endpoint"**: configure your webhook URL to your ngrok HTTPS URL → `https://<ngrok>/webhooks/persona`. Make sure the same secret you set in user-secrets matches the Persona dashboard secret.
-- **"Show payload + signature"**: copy the JSON body and `Persona-Signature` header value, send via curl yourself (no ngrok needed):
-  ```bash
-  curl -i -X POST http://localhost:5158/webhooks/persona \
-    -H 'Content-Type: application/json' \
-    -H 'Persona-Signature: t=...,v1=...' \
-    --data-raw '<paste body>'
-  ```
-  Expect `HTTP/1.1 204 No Content`.
+| What | Why test it |
+| --- | --- |
+| **13.A** Our handler processes Persona's envelope shape correctly | Catches bugs in our parsing / status-mapping / DB writes — independent of network |
+| **13.B** Persona's actual servers can reach us, sign payloads we accept, and deliver successfully | Catches bugs in webhook URL config, secret mismatch, ngrok tunnel, signature format drift |
+
+13.A is fast (no external dep). 13.B is slow but proves the integration works end-to-end. Do A first to confirm the handler is sound, then B to confirm the wiring.
+
+---
+
+### 13.A — Local handler test (`scripts/send-persona-webhook.sh`)
+
+A bash helper in the repo builds the payload + computes the HMAC signature + POSTs it to your local API directly (no Persona infra, no ngrok needed). Reads the webhook secret from your user-secrets automatically.
+
+```bash
+# Run startPersonaInquiry first so the inq_... id is stored on your user row.
+./scripts/send-persona-webhook.sh inq_xxxxx started
+./scripts/send-persona-webhook.sh inq_xxxxx completed
+./scripts/send-persona-webhook.sh inq_xxxxx approved
+```
+
+Override the endpoint to test against an ngrok tunnel or a deployed env:
+```bash
+./scripts/send-persona-webhook.sh inq_xxxxx approved \
+  https://yourtunnel.ngrok.app/webhooks/persona \
+  wbhsec_explicit_secret
+```
+
+Test the stale-event guard by setting an older `updated-at`:
+```bash
+STALE_AT=$(date -u -v-1H +"%Y-%m-%dT%H:%M:%S.000Z") \
+  ./scripts/send-persona-webhook.sh inq_xxxxx completed
+```
+Logs should show `Skipping stale Persona webhook for inquiry inq_… : event @… is not newer than stored @…`.
+
+What this proves: the handler parses, verifies, maps, and writes correctly. **What it doesn't prove**: that Persona's actual signing format and envelope still matches what we expect.
+
+---
+
+### 13.B — Real Persona-driven test (proves the integration)
+
+This is what you should run **before going to production** with any new env.
+
+**One-time setup per testing run:**
+
+1. Boot ngrok if you don't have it running: `ngrok http 5158`. Note the `https://<random>.ngrok.app` URL.
+2. In the Persona dashboard → **Webhooks** (or your inquiry template's webhook config) → set **Destination URL** to `https://<ngrok>/webhooks/persona`.
+3. Confirm the **webhook secret** in Persona's dashboard matches what's in your local user-secrets:
+   ```bash
+   dotnet user-secrets list --project BuzzKeepr.Presentation | grep WebhookSecrets
+   ```
+   If they don't match, copy Persona's value into your user-secrets and restart the API:
+   ```bash
+   dotnet user-secrets set "Persona:WebhookSecrets:0" "wbhsec_..."
+   ```
+
+**Trigger a real event** — three ways, in order of fidelity:
+
+1. **"Send test event" from Persona's webhook config page** — Persona generates a synthetic inquiry, signs it with the configured secret, and POSTs to your URL. Cleanest first test: proves the URL is reachable, the secret matches, and the signature format is what we expect.
+2. **Manually transition an existing inquiry's status from Persona's dashboard** — most inquiries can be advanced by an admin. This produces a real `inquiry.{status}` event with your actual `inq_...` id.
+3. **Complete the hosted flow** at `https://withpersona.com/verify?inquiry-id=<your-inq-id>` (or via the SDK in your frontend) using Persona's [sandbox documents](https://docs.withpersona.com/). This is the gold-standard test — fires a real `started → completed → approved` sequence AND attaches actual government-ID verification data, so `verified_*` columns will populate when you query `currentUser`.
+
+**Watch for in your API logs as Persona delivers events:**
+```
+Processed Persona webhook for inquiry inq_<your-id>. User <user-id> now has identity status Pending
+Processed Persona webhook for inquiry inq_<your-id>. User <user-id> now has identity status Completed
+Processed Persona webhook for inquiry inq_<your-id>. User <user-id> now has identity status Approved
+```
+
+If Persona's dashboard shows the delivery as **failed** (red) but your API logs are silent, the webhook didn't reach you — usually:
+- ngrok URL is stale (restart ngrok and update the Persona destination)
+- Or the secret in Persona doesn't match the one in user-secrets (signature verification failed → 401 → Persona logs failed delivery)
+
+If delivery shows **successful** (green) but our user state didn't update, the inquiry id Persona is sending doesn't match `users.persona_inquiry_id` for any user. Confirm with:
+```sql
+SELECT "Id", "PersonaInquiryId", "IdentityVerificationStatus" FROM "Users" WHERE "Id" = '<your-id>';
+```
+
+---
 
 ### Suggested simulation order
 
@@ -347,6 +464,13 @@ curl -i -X POST http://localhost:5158/webhooks/persona \
 ---
 
 ## 14. Checkr — first run
+
+> **Highly recommended**: use Checkr Trust's **test environment credentials** for this phase. Ask your account exec to provision a test account AND **enable the `instant_criminal` product** for it (otherwise you'll get 401 Unauthorized). Test mode uses the same base URL as production; only credentials determine the environment, and calls don't bill against prod. Swap in:
+> ```bash
+> dotnet user-secrets set "CheckrTrust:ClientId" "<test-id>"
+> dotnet user-secrets set "CheckrTrust:ClientSecret" "<test-secret>"
+> ```
+> Restart the API. In test mode, `instant_criminal` matches on **first + last name only** (DOB / phone / state are sent and validated but ignored when picking the mock outcome). Names not in the mock list (e.g. `Samuel Wemimo`) return empty results → `Approved`. See `.claude/features/identity-verification-checkr.md` for the full list of mock names that produce Denied outcomes.
 
 (Persona must be Approved on this user. If not, skip to phase 16.)
 
@@ -380,6 +504,256 @@ Sign in as a fresh user (don't run Persona). Then:
 mutation { startInstantCriminalCheck(input: {}) { success error } }
 ```
 **Expect**: `error: "Identity verification must be completed before running a background check."`. Checkr dashboard: no new check.
+
+---
+
+## 16.5 Checkr — Denied path (test-env only)
+
+Skip if you're using prod credentials. With Checkr test creds + the deterministic mock profiles, you can verify the Denied badge end-to-end without making up names of real felons:
+
+```sql
+-- Force a re-PII-send by nulling the existing profile, swap the name to a mock that
+-- produces records surviving our rulesets, and re-run. Restore afterward.
+-- David Thompson → sex offense + failure to register (felony ruleset hits → Denied)
+UPDATE "Users"
+SET "VerifiedFirstName" = 'David',
+    "VerifiedLastName"  = 'Thompson',
+    "VerifiedMiddleName"= NULL,
+    "CheckrProfileId"   = NULL,
+    "CheckrLastCheckId" = NULL
+WHERE "Email" = 'you@example.com';
+```
+
+Run `mutation { startInstantCriminalCheck(input: {}) { success hasPossibleMatches resultCount error } }`.
+
+**Expect**: `hasPossibleMatches: true`, `resultCount > 0`. After:
+```sql
+SELECT "BackgroundCheckBadge", "BackgroundCheckBadgeExpiresAtUtc"
+FROM "Users" WHERE "Email" = 'you@example.com';
+```
+→ `BackgroundCheckBadge = Denied`, expiry stamped 3 months out.
+
+Then restore your real verified identity (or do a fresh sign-in for a clean test user) before continuing.
+
+---
+
+## 16.6 Billing — RevenueCat webhook simulation
+
+We test the webhook handler with curl rather than going through the full RN-app + RevenueCat-sandbox loop. The integration tests already exercise the same parsing and state-transition code; this section is for sanity-checking that the deployed surface accepts the auth header, persists the mirror, and ignores stale events.
+
+### Setup (one time)
+
+Set a local webhook auth token. This is the value RevenueCat would echo back as the `Authorization` header in production; locally you pick anything that's hard to guess:
+
+```bash
+dotnet user-secrets set "RevenueCat:WebhookAuthorizationToken" "rc_local_test_pick_something_random" --project BuzzKeepr.Presentation
+dotnet user-secrets set "RevenueCat:SecretApiKey" "rc_test_dummy_secret_for_rest_fallback" --project BuzzKeepr.Presentation
+```
+
+Restart the API. Pick a signed-in user's `id` (Guid) from phase 5 — call it `<USER_ID>` below. By convention, `revenuecat_app_user_id` equals `users.id`, so we use the Guid as `app_user_id` in every event.
+
+### 16.6a Initial purchase (trial — the $3.99 intro period)
+
+```bash
+USER_ID=<paste-your-user-guid>
+TOKEN="rc_local_test_pick_something_random"
+NOW_MS=$(($(date +%s) * 1000))
+EXP_MS=$(($(date +%s) * 1000 + 7 * 24 * 60 * 60 * 1000))
+
+curl -i -X POST http://localhost:5000/webhooks/revenuecat \
+  -H "Authorization: $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"event\": {
+      \"id\": \"evt_initial_$(uuidgen)\",
+      \"type\": \"INITIAL_PURCHASE\",
+      \"app_user_id\": \"$USER_ID\",
+      \"product_id\": \"premium_monthly\",
+      \"entitlement_ids\": [\"premium\"],
+      \"store\": \"APP_STORE\",
+      \"period_type\": \"TRIAL\",
+      \"event_timestamp_ms\": $NOW_MS,
+      \"expiration_at_ms\": $EXP_MS
+    }
+  }"
+```
+
+**Expect:** `204 No Content`. Verify in DB:
+
+```sql
+SELECT "SubscriptionStatus", "SubscriptionEntitlement", "SubscriptionProductId",
+       "SubscriptionStore", "SubscriptionWillRenew", "SubscriptionCurrentPeriodEndUtc",
+       "SubscriptionUpdatedAtUtc", "RevenueCatAppUserId"
+FROM "Users" WHERE "Id" = '<USER_ID>';
+```
+
+→ `Trialing`, `premium`, `premium_monthly`, `AppStore`, `true`, period-end ~7 days out, watermark stamped, app_user_id == users.id.
+
+Verify via GraphQL too — `currentUser` should now expose it:
+
+```graphql
+query { currentUser { subscription { status entitlement productId store currentPeriodEndUtc willRenew isActive } } }
+```
+
+→ `isActive: true`, status `TRIALING`.
+
+### 16.6b Renewal (extend the period)
+
+```bash
+NOW_MS=$(($(date +%s) * 1000))
+EXP_MS=$(($(date +%s) * 1000 + 30 * 24 * 60 * 60 * 1000))
+
+curl -i -X POST http://localhost:5000/webhooks/revenuecat \
+  -H "Authorization: $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"event\": {
+      \"id\": \"evt_renewal_$(uuidgen)\",
+      \"type\": \"RENEWAL\",
+      \"app_user_id\": \"$USER_ID\",
+      \"product_id\": \"premium_monthly\",
+      \"entitlement_ids\": [\"premium\"],
+      \"store\": \"APP_STORE\",
+      \"period_type\": \"NORMAL\",
+      \"event_timestamp_ms\": $NOW_MS,
+      \"expiration_at_ms\": $EXP_MS
+    }
+  }"
+```
+
+**Expect:** `204`. DB: `SubscriptionStatus` flips to `Active`, `SubscriptionCurrentPeriodEndUtc` advances ~30 days.
+
+### 16.6c Cancellation (user cancels but period still paid)
+
+```bash
+NOW_MS=$(($(date +%s) * 1000))
+
+curl -i -X POST http://localhost:5000/webhooks/revenuecat \
+  -H "Authorization: $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"event\": {
+      \"id\": \"evt_cancel_$(uuidgen)\",
+      \"type\": \"CANCELLATION\",
+      \"app_user_id\": \"$USER_ID\",
+      \"product_id\": \"premium_monthly\",
+      \"entitlement_ids\": [\"premium\"],
+      \"store\": \"APP_STORE\",
+      \"period_type\": \"NORMAL\",
+      \"event_timestamp_ms\": $NOW_MS,
+      \"expiration_at_ms\": $(($(date +%s) * 1000 + 30 * 24 * 60 * 60 * 1000))
+    }
+  }"
+```
+
+**Expect:** `204`. DB: status `Cancelled`, `WillRenew=false`, but `isActive: true` from GraphQL because the period hasn't ended yet (this is the right behavior — user keeps premium until period_end).
+
+### 16.6d Stale event drop (out-of-order replay)
+
+Send a `CANCELLATION` with an `event_timestamp_ms` *older* than the watermark we just stamped:
+
+```bash
+STALE_MS=$(($(date +%s) * 1000 - 10 * 60 * 1000))  # 10 min ago
+
+curl -i -X POST http://localhost:5000/webhooks/revenuecat \
+  -H "Authorization: $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"event\": {
+      \"id\": \"evt_stale_$(uuidgen)\",
+      \"type\": \"EXPIRATION\",
+      \"app_user_id\": \"$USER_ID\",
+      \"product_id\": \"premium_monthly\",
+      \"entitlement_ids\": [\"premium\"],
+      \"store\": \"APP_STORE\",
+      \"period_type\": \"NORMAL\",
+      \"event_timestamp_ms\": $STALE_MS,
+      \"expiration_at_ms\": 0
+    }
+  }"
+```
+
+**Expect:** `204` (we always 204 so RevenueCat doesn't retry), but **state is unchanged** in the DB and the API logs:
+
+```
+Skipping stale RevenueCat event evt_stale_…/EXPIRATION: @… not newer than stored @…
+```
+
+### 16.6e Bad auth (rejected)
+
+```bash
+curl -i -X POST http://localhost:5000/webhooks/revenuecat \
+  -H "Authorization: not-the-right-token" \
+  -H "Content-Type: application/json" \
+  -d '{"event":{"type":"INITIAL_PURCHASE","app_user_id":"whatever"}}'
+```
+
+**Expect:** `401 Unauthorized`. DB unchanged.
+
+### 16.6f Reset before next test run
+
+```sql
+UPDATE "Users"
+SET "SubscriptionStatus" = 'None',
+    "SubscriptionEntitlement" = NULL,
+    "SubscriptionProductId" = NULL,
+    "SubscriptionStore" = NULL,
+    "SubscriptionCurrentPeriodEndUtc" = NULL,
+    "SubscriptionWillRenew" = NULL,
+    "SubscriptionUpdatedAtUtc" = NULL,
+    "RevenueCatAppUserId" = NULL
+WHERE "Id" = '<USER_ID>';
+```
+
+### Notes
+
+- **Real RevenueCat → backend** can't be tested locally without a public URL. Use the develop Render service (`https://buzzkeepr-api-develop.onrender.com/webhooks/revenuecat`) configured in the RevenueCat dashboard, or expose localhost via cloudflared / ngrok. RevenueCat also has a "Send Test Event" button on each webhook config row that fires a `TEST` event — useful for confirming auth + reachability without needing a real purchase.
+- **REST fallback path** (`IBillingService.GetSubscriptionForUserAsync`) isn't exercised through `currentUser`, which reads the mirror directly. It only fires when something explicitly calls the service — e.g. a future paid-surface gate. The integration tests cover it.
+
+---
+
+## 16.7 Background check renewal sweeper (auto-renewal for active subscribers)
+
+`BackgroundCheckRenewalBackgroundService` runs every 6 hours and re-runs the Checkr instant criminal check for any user whose badge has expired *and* whose subscription is still active. To trigger immediately without waiting:
+
+1. Make sure the user has a Checkr profile already (run phase 14 at least once).
+2. Make sure the user has an active subscription (run phase 16.6a to fire an `INITIAL_PURCHASE` webhook).
+3. Force the badge expiry into the past:
+
+```sql
+UPDATE "Users"
+SET "BackgroundCheckBadgeExpiresAtUtc" = now() - interval '1 hour'
+WHERE "Email" = 'you@example.com';
+```
+
+4. Restart the API — the sweeper runs immediately on host startup.
+5. Watch logs:
+
+```
+Renewing Checkr badge for user <id> (sub active, badge expired @ <ts>).
+Background check renewal sweep: 1/1 renewed, 0 failed.
+```
+
+6. Verify in DB:
+
+```sql
+SELECT "BackgroundCheckBadge", "BackgroundCheckBadgeExpiresAtUtc",
+       "CheckrLastCheckId", "CheckrLastCheckAtUtc"
+FROM "Users" WHERE "Email" = 'you@example.com';
+```
+
+→ `CheckrLastCheckId` is a fresh UUID, `CheckrLastCheckAtUtc` is just now, `BackgroundCheckBadgeExpiresAtUtc` is ~3 months in the future.
+
+**Negative case (subscription not active):**
+
+```sql
+UPDATE "Users"
+SET "BackgroundCheckBadgeExpiresAtUtc" = now() - interval '1 hour',
+    "SubscriptionStatus" = 'Expired'
+WHERE "Email" = 'you@example.com';
+```
+
+Restart the API. Logs show no renewal for this user; their badge expiry stays in the past. The frontend will treat the badge as invalid.
 
 ---
 

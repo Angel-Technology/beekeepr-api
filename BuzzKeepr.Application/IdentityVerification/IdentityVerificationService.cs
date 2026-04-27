@@ -1,5 +1,7 @@
 using System.Text.Json;
+using BuzzKeepr.Application.Billing;
 using BuzzKeepr.Application.IdentityVerification.Models;
+using BuzzKeepr.Application.Users;
 using BuzzKeepr.Domain.Enums;
 using Microsoft.Extensions.Logging;
 
@@ -9,6 +11,8 @@ public sealed class IdentityVerificationService(
     IIdentityVerificationRepository identityVerificationRepository,
     IPersonaClient personaClient,
     ICheckrTrustClient checkrTrustClient,
+    IWelcomeEmailSender welcomeEmailSender,
+    IBillingService billingService,
     ILogger<IdentityVerificationService> logger) : IIdentityVerificationService
 {
     private static readonly HashSet<IdentityVerificationStatus> RetryableStatuses =
@@ -17,6 +21,13 @@ public sealed class IdentityVerificationService(
         IdentityVerificationStatus.Expired,
         IdentityVerificationStatus.Failed
     ];
+
+    // Calendar months, not a fixed TimeSpan, because "3 months" reads naturally on a profile
+    // ("Verified through Oct 2026") and we use DateTime.AddMonths to handle month-length variance.
+    // For active subscribers, BackgroundCheckRenewalBackgroundService re-runs the check every cycle
+    // so the badge stays fresh without user action. For lapsed subscribers, the badge timestamp is
+    // simply past now() and the frontend treats it as expired.
+    private const int BackgroundCheckBadgeValidMonths = 3;
 
     public async Task<StartPersonaInquiryResult> StartPersonaInquiryAsync(Guid userId, CancellationToken cancellationToken)
     {
@@ -50,6 +61,27 @@ public sealed class IdentityVerificationService(
                 Success = true,
                 CreatedNewInquiry = false,
                 InquiryId = user.PersonaInquiryId,
+                IdentityVerificationStatus = user.IdentityVerificationStatus,
+                PersonaInquiryStatus = user.PersonaInquiryStatus
+            };
+        }
+
+        // Subscription gate. Only fires when we'd create a new inquiry (initial attempt or
+        // a retry after Failed/Declined/Expired) — both paths burn a paid Persona call. Reusing
+        // an existing inquiry is free and stays accessible even if the user's sub has lapsed.
+        // GetSubscriptionForUserAsync includes the RevenueCat REST fallback, so a freshly-paid
+        // user whose webhook hasn't landed isn't blocked at the door.
+        var subscription = await billingService.GetSubscriptionForUserAsync(user.Id, cancellationToken);
+        if (!subscription.IsActive)
+        {
+            logger.LogInformation(
+                "Blocking Persona inquiry creation for user {UserId}: no active subscription.",
+                user.Id);
+
+            return new StartPersonaInquiryResult
+            {
+                SubscriptionRequired = true,
+                Error = "Active subscription required to start identity verification.",
                 IdentityVerificationStatus = user.IdentityVerificationStatus,
                 PersonaInquiryStatus = user.PersonaInquiryStatus
             };
@@ -163,6 +195,15 @@ public sealed class IdentityVerificationService(
             }
         }
 
+        // Email-sign-in users have no display name when they sign up, so the welcome email
+        // was deferred (see AuthService.VerifyEmailSignInAsync). Now that Persona has given
+        // us a real name, send the welcome — once.
+        if (user.WelcomeEmailSentAtUtc is null
+            && !string.IsNullOrWhiteSpace(user.VerifiedFirstName))
+        {
+            await TrySendDeferredWelcomeAsync(user, cancellationToken);
+        }
+
         await identityVerificationRepository.SaveChangesAsync(cancellationToken);
 
         logger.LogInformation(
@@ -235,6 +276,16 @@ public sealed class IdentityVerificationService(
 
         user.CheckrLastCheckAtUtc = DateTime.UtcNow;
         user.CheckrLastCheckHasPossibleMatches = result.HasPossibleMatches;
+
+        // Badge classification: Checkr's ruleset has already filtered out records the
+        // ruleset considers acceptable (e.g. minor traffic). Anything that survived and
+        // shows up in `results` is, by ruleset definition, disqualifying.
+        // Expiry is informational — the frontend gates renewal UX on it; the backend
+        // never auto-transitions the badge after this point. Renewal is a paid re-check.
+        user.BackgroundCheckBadge = result.HasPossibleMatches == true
+            ? BackgroundCheckBadge.Denied
+            : BackgroundCheckBadge.Approved;
+        user.BackgroundCheckBadgeExpiresAtUtc = DateTime.UtcNow.AddMonths(BackgroundCheckBadgeValidMonths);
 
         if (!string.IsNullOrWhiteSpace(trimmedPhone))
             user.PhoneNumber = trimmedPhone;
@@ -318,6 +369,25 @@ public sealed class IdentityVerificationService(
         }
 
         return null;
+    }
+
+    private async Task TrySendDeferredWelcomeAsync(Domain.Entities.User user, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // SendWelcomeAsync's second arg is treated as the "display name" — we pass the
+            // verified first name directly. The sender's own first-token-extraction is a no-op
+            // on a single token, so this renders as "Welcome to BuzzKeepr, {firstName}."
+            await welcomeEmailSender.SendWelcomeAsync(user.Email, user.VerifiedFirstName, cancellationToken);
+            user.WelcomeEmailSentAtUtc = DateTime.UtcNow;
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(
+                exception,
+                "Deferred welcome email failed to send for user {UserId} on Persona approval; sweeper will retry.",
+                user.Id);
+        }
     }
 
     private static string? NormalizeStateCode(string? raw)

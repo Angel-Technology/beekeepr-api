@@ -44,9 +44,29 @@ public sealed class User
 
     public bool? CheckrLastCheckHasPossibleMatches { get; set; }
 
+    public BackgroundCheckBadge BackgroundCheckBadge { get; set; } = BackgroundCheckBadge.None;
+
+    public DateTime? BackgroundCheckBadgeExpiresAtUtc { get; set; }
+
     public DateTime? TermsAcceptedAtUtc { get; set; }
 
     public DateTime? WelcomeEmailSentAtUtc { get; set; }
+
+    public SubscriptionStatus SubscriptionStatus { get; set; } = SubscriptionStatus.None;
+
+    public string? SubscriptionEntitlement { get; set; }
+
+    public string? SubscriptionProductId { get; set; }
+
+    public SubscriptionStore? SubscriptionStore { get; set; }
+
+    public DateTime? SubscriptionCurrentPeriodEndUtc { get; set; }
+
+    public bool? SubscriptionWillRenew { get; set; }
+
+    public DateTime? SubscriptionUpdatedAtUtc { get; set; }
+
+    public string? RevenueCatAppUserId { get; set; }
 
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 

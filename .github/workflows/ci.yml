@@ -6,6 +6,12 @@ on:
   push:
     branches: [main, develop]
 
+env:
+  # GitHub is migrating JavaScript actions to Node 24 (default June 2 2026, mandatory
+  # Sep 16 2026 — see https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/).
+  # Opting in early so we don't see deprecation warnings on every run.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
@@ -34,7 +40,11 @@ jobs:
         run: dotnet build --configuration Release --no-restore
 
       - name: Unit tests
-        run: dotnet test BuzzKeepr.UnitTests --configuration Release --no-build --verbosity normal
+        run: |
+          dotnet test BuzzKeepr.UnitTests \
+            --configuration Release --no-build --verbosity normal \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./coverage/unit
 
       - name: Integration tests
         # GitHub-hosted ubuntu runners ship with Docker pre-installed,
@@ -50,4 +60,29 @@ jobs:
         env:
           Email__ResendApiKey:           re_test_dummy_key
           Database__ConnectionString:    Host=ignored;Database=ignored;Username=ignored;Password=ignored
-        run: dotnet test BuzzKeepr.IntegrationTests --configuration Release --no-build --verbosity normal
+        run: |
+          dotnet test BuzzKeepr.IntegrationTests \
+            --configuration Release --no-build --verbosity normal \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./coverage/integration
+
+      - name: Coverage summary
+        if: always()
+        # `coverlet.collector` (already in both test csprojs) emits cobertura.xml during
+        # the test runs above. We aggregate them with reportgenerator and dump a markdown
+        # summary into the workflow run page. Visibility-only — no PR-blocking gate.
+        # See `.claude/testing.md` for the "we don't chase coverage percentages" rationale.
+        run: |
+          dotnet tool install --global dotnet-reportgenerator-globaltool > /dev/null
+          reportgenerator \
+            -reports:"coverage/**/coverage.cobertura.xml" \
+            -targetdir:"coverage/report" \
+            -reporttypes:"MarkdownSummaryGithub" \
+            -title:"BuzzKeepr.API" > /dev/null
+          {
+            echo "## Test coverage"
+            echo
+            echo "_Visibility only — we do **not** gate on coverage percentage. See \`.claude/testing.md\` for the philosophy._"
+            echo
+            cat coverage/report/SummaryGithub.md
+          } >> "$GITHUB_STEP_SUMMARY"

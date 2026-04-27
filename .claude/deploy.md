@@ -74,6 +74,14 @@ After the first deploy of each service, Render gives you a URL like `https://buz
 
 Each env should use its own webhook secret so a leak in one doesn't compromise the other.
 
+### 4. RevenueCat webhook URLs
+
+In the RevenueCat dashboard, configure one webhook per environment (Project Settings → Webhooks):
+- Develop env → URL `https://buzzkeepr-api-develop.onrender.com/webhooks/revenuecat`
+- Prod env → URL `https://buzzkeepr-api-prod.onrender.com/webhooks/revenuecat`
+
+Set the **Authorization Header** value in the dashboard to a long random string per environment, and mirror it in the matching Render service's `RevenueCat__WebhookAuthorizationToken` env var. RevenueCat doesn't HMAC-sign webhooks — this header is the only auth, so treat it like a secret.
+
 ## Env var checklist (per service)
 
 Set in Render UI under each service → Environment.
@@ -89,10 +97,13 @@ Set in Render UI under each service → Environment.
 | `Persona__ApiKey` | sandbox key | live key |
 | `Persona__InquiryTemplateId` | sandbox `itmpl_...` | live `itmpl_...` |
 | `Persona__WebhookSecrets__0` | dev webhook secret | prod webhook secret |
-| `CheckrTrust__ClientId` | dev creds | prod creds |
-| `CheckrTrust__ClientSecret` | dev creds | prod creds |
-| `CheckrTrust__RulesetId` | `08f2b453-...` | same (or different ruleset for prod) |
+| `CheckrTrust__ClientId` | **test-env creds from your Checkr account exec** (deterministic mock results, no billing). Make sure the rep enables the `instant_criminal` product for the test account. | live prod creds |
+| `CheckrTrust__ClientSecret` | test-env creds | prod creds |
+| `CheckrTrust__RulesetIds__0` | `08f2b453-...` (felonies, all-time) | same (or different ruleset for prod) |
+| `CheckrTrust__RulesetIds__1` | `40b1e7c2-...` (misdemeanors, 7-year) | same |
 | `Auth__AppApiKey` | a long random string the dev frontend embeds | a different long random string for the prod frontend |
+| `RevenueCat__SecretApiKey` | dev RevenueCat project's secret API key | prod project's secret API key |
+| `RevenueCat__WebhookAuthorizationToken` | dev value (matches the Authorization Header value set in the RevenueCat webhook config) | prod value — **different secret per environment** so a leak in one doesn't compromise the other |
 | `Sentry__Dsn` | dev project DSN | prod project DSN (separate Sentry project recommended) |
 | `Cors__AllowedOrigins__0` | `https://dev.buzzkeepr.com` | `https://app.buzzkeepr.com` |
 

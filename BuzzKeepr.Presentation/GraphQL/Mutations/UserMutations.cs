@@ -301,6 +301,7 @@ public sealed class UserMutations
             InquiryId = result.InquiryId,
             IdentityVerificationStatus = result.IdentityVerificationStatus,
             PersonaInquiryStatus = result.PersonaInquiryStatus,
+            SubscriptionRequired = result.SubscriptionRequired,
             Error = result.Error
         };
     }

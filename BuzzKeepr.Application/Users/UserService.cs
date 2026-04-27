@@ -1,3 +1,4 @@
+using BuzzKeepr.Application.Billing.Models;
 using BuzzKeepr.Application.IdentityVerification;
 using BuzzKeepr.Application.Users.Models;
 using BuzzKeepr.Domain.Entities;
@@ -115,7 +116,10 @@ public sealed class UserService(
             VerifiedLicenseState = user.VerifiedLicenseState,
             PhoneNumber = user.PhoneNumber,
             PersonaVerifiedAtUtc = user.PersonaVerifiedAtUtc,
+            BackgroundCheckBadge = user.BackgroundCheckBadge,
+            BackgroundCheckBadgeExpiresAtUtc = user.BackgroundCheckBadgeExpiresAtUtc,
             TermsAcceptedAtUtc = user.TermsAcceptedAtUtc,
+            Subscription = SubscriptionDto.FromUser(user),
             CreatedAtUtc = user.CreatedAtUtc
         };
     }

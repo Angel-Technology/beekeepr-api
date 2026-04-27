@@ -51,7 +51,9 @@ public sealed class WelcomeEmailSweeperBackgroundService(
         var cutoffUtc = DateTime.UtcNow.Subtract(InlineSendGracePeriod);
 
         var pending = await dbContext.Users
-            .Where(user => user.WelcomeEmailSentAtUtc == null && user.CreatedAtUtc < cutoffUtc)
+            .Where(user => user.WelcomeEmailSentAtUtc == null
+                && user.CreatedAtUtc < cutoffUtc
+                && (user.DisplayName != null || user.VerifiedFirstName != null))
             .OrderBy(user => user.CreatedAtUtc)
             .Take(BatchSize)
             .ToListAsync(cancellationToken);
@@ -64,7 +66,7 @@ public sealed class WelcomeEmailSweeperBackgroundService(
         {
             try
             {
-                await welcomeSender.SendWelcomeAsync(user.Email, user.DisplayName, cancellationToken);
+                await welcomeSender.SendWelcomeAsync(user.Email, user.DisplayName ?? user.VerifiedFirstName, cancellationToken);
                 user.WelcomeEmailSentAtUtc = DateTime.UtcNow;
                 sent++;
             }

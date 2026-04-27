@@ -1,6 +1,6 @@
 # Feature: Identity Verification — Checkr Trust (Instant Criminal Check)
 
-Status: **In-flight** (active on the `persona` branch).
+Status: **Complete.** Instant criminal check, profile reuse, multi-ruleset, badge classification with 3-month expiry, automatic renewal sweeper for active subscribers, and integration tests are all in place.
 
 ## What it does
 
@@ -25,6 +25,42 @@ All on `users` (added by migration `20260425210544_AddCheckrProfileTracking`).
 | `checkr_last_check_has_possible_matches` | `true` if the last response's `results` array was non-empty. |
 
 No PII is persisted on our side.
+
+## Badge classification (from check results)
+
+The user-visible "background-checked" badge is derived directly from the check result + Checkr's ruleset filtering. Stored on the user as two columns:
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `background_check_badge` | enum (`None`, `Approved`, `Denied`) | Set by `IdentityVerificationService.CreateInstantCriminalCheckAsync` on every successful Checkr response. **The backend never transitions this value on its own** — it's the immutable result of the last actual check. |
+| `background_check_badge_expires_at_utc` | timestamp | Stamped to `now + 3 months` on every check. For active subscribers, `BackgroundCheckRenewalBackgroundService` automatically re-runs the check shortly after this passes; for lapsed subscribers, the timestamp simply ages out and the frontend treats the badge as expired. |
+
+**Classification logic is delegated to Checkr's ruleset.** We send `ruleset_ids: [...]` on every check; Checkr's server applies the rules and only returns records that survive (i.e. that the ruleset considers disqualifying). So:
+- `result_count == 0` → ruleset filtered everything out → **`Approved`**
+- `result_count > 0` → ruleset judged at least one record disqualifying → **`Denied`**
+
+Tweaking what counts as "minor / OK" vs "disqualifying" is a no-code change in Checkr's dashboard rulesets — we don't classify on our side.
+
+**Multi-ruleset setup (current):**
+- Felonies, all-time, conviction (`08f2b453-...`)
+- Misdemeanors, 7-year, conviction (`40b1e7c2-...`)
+
+Checkr merges + de-duplicates the rulesets server-side, so a record only needs to violate one to count.
+
+### Renewal model
+
+Active subscribers get **automatic renewal**. `BackgroundCheckRenewalBackgroundService` (`BuzzKeepr.Infrastructure/IdentityVerification/`) sweeps every 6 hours and re-runs the instant criminal check for any user matching:
+
+- `BackgroundCheckBadge != None` AND
+- `BackgroundCheckBadgeExpiresAtUtc < now` AND
+- subscription is locally active (status not `None`/`Expired`, current period not yet ended) AND
+- has an existing `CheckrProfileId` (so the renewal uses the cheap profile-reuse path, not a fresh PII send)
+
+It calls `IIdentityVerificationService.CreateInstantCriminalCheckAsync` with empty input — the existing service code reuses the profile, runs the check, updates the badge based on results, and stamps a fresh 3-month expiry. Failures are logged and retried next pass; a subscription that lapses mid-renewal-cycle is simply skipped on subsequent passes.
+
+For **lapsed subscribers**, nothing happens automatically. Their `BackgroundCheckBadgeExpiresAtUtc` ages past `now()` and the frontend treats the badge as expired. If they resubscribe, the very next sweep picks them up (assuming their badge expiry is past, which it will be).
+
+This is the "we eat the Checkr cost as part of the subscription" model — the user pays for premium monthly; we re-verify them every 3 months on our dime.
 
 ## GraphQL surface
 
@@ -80,7 +116,59 @@ This is more efficient than either of the two patterns Checkr's docs suggest (re
   - `ApiBaseUrl` — defaults to `https://api.checkrtrust.com`
   - **`ClientId`** — user-secret
   - **`ClientSecret`** — user-secret
-  - `RulesetId` — non-secret, set in `appsettings.Development.json` (and per-env). The ruleset is created in the Checkr dashboard.
+  - `RulesetIds` — array of ruleset UUIDs from the Checkr dashboard. Non-secret, set in `appsettings.Development.json` (and per-env).
+
+### Test environment
+
+Checkr Trust offers a separate test environment with deterministic mock data. Important details from [their test-accounts docs](https://docs.checkrtrust.com/test-accounts):
+
+- **Same base URL** as production (`https://api.checkrtrust.com/v1`). Only the credentials determine which environment you're hitting.
+- **Test accounts can't reach prod data and vice versa.** Calls don't bill against production.
+- **Each test account needs products explicitly enabled.** When you ask your Checkr exec for test creds, ask them to **enable `instant_criminal`** specifically — otherwise you'll get `401 Unauthorized` on Create Check calls.
+- **Instant Criminal test mode matches on first + last name only.** DOB, phone, state, middle name are all ignored when selecting a mock profile (though they're still sent / validated). So changing only `VerifiedFirstName` + `VerifiedLastName` is enough to pick a test outcome.
+
+#### Mock profiles for `instant_criminal` (what we call)
+
+| Name | Returns | Hits our rulesets → badge |
+| --- | --- | --- |
+| `David Thompson` | Sexual offense records + failure to register | Felony ruleset hits → **`Denied`** |
+| `Oliver Smith` | Sex offense registry record | Felony ruleset hits → **`Denied`** |
+| `Miguel Santos` | Sex offender registry record | Felony ruleset hits → **`Denied`** |
+| `Kimberly Park` | Sex offender registry + court/DOC records | Felony ruleset hits → **`Denied`** |
+| `Ava Jones` | Sexual offense + failure to register | Felony ruleset hits → **`Denied`** |
+| `Marcus Williams` | Traffic violations + domestic violence | Likely hits one of the rulesets → probably **`Denied`** |
+| `Tyler Brooks` | Sex offender registry + traffic violation | Felony ruleset hits → **`Denied`** |
+| `Rebecca Foster` | Theft + traffic violations | Depends on disposition / level — test it |
+| `Lisa Chen` | DUI + traffic violations | Depends on disposition — test it |
+| `Sarah Martinez` | Speeding only | Likely filtered by both rulesets → **`Approved`** |
+| `Dolores Abernathy` | Speeding only | Likely filtered → **`Approved`** |
+| **Any name not in this list** (e.g. `Samuel Wemimo`, `John Smith`) | Empty results | **`Approved`** |
+
+Note: the names appear under **other Checkr Trust products** for different scenarios (e.g. `Michael Doe` is a Cook County misdemeanor in the County-Check product, `Thomas Reed` is a clear County-Check). Those don't apply to instant_criminal.
+
+#### Setup once your exec sends test creds
+
+```bash
+cd BuzzKeepr.Presentation
+dotnet user-secrets set "CheckrTrust:ClientId"     "<test-client-id>"
+dotnet user-secrets set "CheckrTrust:ClientSecret" "<test-client-secret>"
+# restart the API
+```
+
+To exercise the Denied path manually:
+
+```sql
+UPDATE "Users"
+SET "VerifiedFirstName"   = 'David',
+    "VerifiedLastName"    = 'Thompson',
+    "VerifiedMiddleName"  = NULL,
+    "CheckrProfileId"     = NULL,   -- force fresh PII send instead of profile reuse
+    "CheckrLastCheckId"   = NULL
+WHERE "Email" = 'you@example.com';
+-- run startInstantCriminalCheck → expect Denied badge
+```
+
+Restore your real verified identity (or sign in as a fresh user) when done. For prod: swap to live credentials before deploying. Render's per-service env vars handle this naturally.
 
 ## Files to watch
 
