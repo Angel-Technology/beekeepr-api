@@ -10,6 +10,8 @@ public sealed class StartPersonaInquiryResult
 
     public string? InquiryId { get; init; }
 
+    public string? SessionToken { get; init; }
+
     public IdentityVerificationStatus IdentityVerificationStatus { get; init; } = IdentityVerificationStatus.NotStarted;
 
     public PersonaInquiryStatus? PersonaInquiryStatus { get; init; }

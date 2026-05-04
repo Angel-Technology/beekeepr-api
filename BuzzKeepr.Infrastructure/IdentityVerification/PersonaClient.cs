@@ -39,15 +39,22 @@ public sealed class PersonaClient(
             };
         }
 
+        var attributes = new Dictionary<string, object?>
+        {
+            ["inquiry-template-id"] = options.InquiryTemplateId
+        };
+
+        if (!string.IsNullOrWhiteSpace(options.ThemeSetId))
+        {
+            attributes["theme-set-id"] = options.ThemeSetId;
+        }
+
         var requestBody = new Dictionary<string, object?>
         {
             ["data"] = new Dictionary<string, object?>
             {
                 ["type"] = "inquiry",
-                ["attributes"] = new Dictionary<string, object?>
-                {
-                    ["inquiry-template-id"] = options.InquiryTemplateId
-                }
+                ["attributes"] = attributes
             },
             ["meta"] = new Dictionary<string, object?>
             {
@@ -89,8 +96,8 @@ public sealed class PersonaClient(
 
             if (!document.RootElement.TryGetProperty("data", out var data)
                 || !data.TryGetProperty("id", out var idElement)
-                || !data.TryGetProperty("attributes", out var attributes)
-                || !attributes.TryGetProperty("status", out var statusElement))
+                || !data.TryGetProperty("attributes", out var attributesElement)
+                || !attributesElement.TryGetProperty("status", out var statusElement))
             {
                 logger.LogWarning(
                     "Persona inquiry creation response was missing expected fields. Response: {ResponseBody}",
@@ -116,6 +123,101 @@ public sealed class PersonaClient(
             return new CreatePersonaInquiryResult
             {
                 Error = $"Persona inquiry creation threw an exception: {exception.Message}"
+            };
+        }
+    }
+
+    public async Task<CreatePersonaSessionTokenResult> CreateInquirySessionTokenAsync(
+        string inquiryId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(options.ApiKey))
+        {
+            return new CreatePersonaSessionTokenResult
+            {
+                Error = "Persona:ApiKey is not configured."
+            };
+        }
+
+        if (string.IsNullOrWhiteSpace(inquiryId))
+        {
+            return new CreatePersonaSessionTokenResult
+            {
+                Error = "Inquiry id is required to mint a session token."
+            };
+        }
+
+        try
+        {
+            using var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                BuildUri($"/api/v1/inquiries/{Uri.EscapeDataString(inquiryId)}/resume"));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
+            request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
+
+            using var response = await httpClient.SendAsync(request, cancellationToken);
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                logger.LogWarning(
+                    "Persona inquiry resume failed for inquiry {InquiryId} with status {StatusCode}. Response: {ResponseBody}",
+                    inquiryId,
+                    (int)response.StatusCode,
+                    responseBody);
+
+                return new CreatePersonaSessionTokenResult
+                {
+                    Error = $"Persona inquiry resume failed with status {(int)response.StatusCode}: {Truncate(responseBody)}"
+                };
+            }
+
+            using var document = JsonDocument.Parse(responseBody);
+
+            // Persona's `/resume` endpoint returns the session token on
+            // `meta.session-token`. Some past response shapes have used the
+            // snake_case spelling; check both to be robust.
+            if (!document.RootElement.TryGetProperty("meta", out var meta))
+            {
+                logger.LogWarning(
+                    "Persona inquiry resume response had no meta object for inquiry {InquiryId}. Response: {ResponseBody}",
+                    inquiryId,
+                    responseBody);
+
+                return new CreatePersonaSessionTokenResult
+                {
+                    Error = $"Persona inquiry resume response was missing the meta object: {Truncate(responseBody)}"
+                };
+            }
+
+            var sessionToken = GetString(meta, "session-token") ?? GetString(meta, "session_token");
+
+            if (string.IsNullOrWhiteSpace(sessionToken))
+            {
+                logger.LogWarning(
+                    "Persona inquiry resume response had no session token for inquiry {InquiryId}. Response: {ResponseBody}",
+                    inquiryId,
+                    responseBody);
+
+                return new CreatePersonaSessionTokenResult
+                {
+                    Error = $"Persona inquiry resume response was missing the session token: {Truncate(responseBody)}"
+                };
+            }
+
+            return new CreatePersonaSessionTokenResult
+            {
+                Success = true,
+                SessionToken = sessionToken
+            };
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "Persona inquiry resume threw an exception for inquiry {InquiryId}.", inquiryId);
+
+            return new CreatePersonaSessionTokenResult
+            {
+                Error = $"Persona inquiry resume threw an exception: {exception.Message}"
             };
         }
     }

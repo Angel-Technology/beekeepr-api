@@ -344,6 +344,156 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Webhook_DeclinedInquiry_SetsDeclinedAndDoesNotFetchVerifiedData()
+    {
+        const string inquiryId = "inq_persona_declined";
+        factory.FakePersona.NextCreateInquiryResult = new CreatePersonaInquiryResult
+        {
+            Success = true,
+            InquiryId = inquiryId,
+            InquiryStatus = "created"
+        };
+        // If our handler ever wrongly fetched on Declined, this would leak into the user row.
+        factory.FakePersona.NextGovernmentIdDataResult = new PersonaGovernmentIdDataResult
+        {
+            Success = true,
+            FirstName = "ShouldNotBeUsed",
+            LastName = "ShouldNotBeUsed"
+        };
+
+        var (token, userId, _) = await SignInAsync();
+        var http = factory.CreateClient();
+        http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        var graphql = new GraphQLClient(http);
+
+        await graphql.SendAsync<JsonElement>(
+            "mutation { startPersonaInquiry { success error } }");
+
+        var webhookBody = BuildInquiryWebhookBody(inquiryId, "declined");
+        var response = await PostWebhookAsync(webhookBody, BuildSignatureHeader(WebhookSecret, webhookBody));
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
+        var user = await dbContext.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
+
+        Assert.Equal(IdentityVerificationStatus.Declined, user.IdentityVerificationStatus);
+        Assert.Equal(PersonaInquiryStatus.Declined, user.PersonaInquiryStatus);
+        Assert.Null(user.VerifiedFirstName);
+        Assert.Null(user.VerifiedLastName);
+        Assert.Null(user.PersonaVerifiedAtUtc);
+        Assert.Empty(factory.FakePersona.GetGovernmentIdDataCalls);
+    }
+
+    [Fact]
+    public async Task Webhook_ApprovedButGovernmentIdFetchFails_LeavesVerifiedFieldsNull()
+    {
+        // Pins the documented sharp edge: if Persona's GET /verifications/government-id call fails
+        // at webhook time, we still flip the user to Approved but VerifiedFirstName stays null and
+        // PersonaVerifiedAtUtc is not stamped. A reconciliation job (not yet built) would fix this.
+        const string inquiryId = "inq_persona_approved_fetch_fails";
+        factory.FakePersona.NextCreateInquiryResult = new CreatePersonaInquiryResult
+        {
+            Success = true,
+            InquiryId = inquiryId,
+            InquiryStatus = "created"
+        };
+        factory.FakePersona.NextGovernmentIdDataResult = new PersonaGovernmentIdDataResult
+        {
+            Success = false
+        };
+
+        var (token, userId, _) = await SignInAsync();
+        var http = factory.CreateClient();
+        http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        var graphql = new GraphQLClient(http);
+
+        await graphql.SendAsync<JsonElement>(
+            "mutation { startPersonaInquiry { success error } }");
+
+        var webhookBody = BuildInquiryWebhookBody(inquiryId, "approved");
+        var response = await PostWebhookAsync(webhookBody, BuildSignatureHeader(WebhookSecret, webhookBody));
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
+        var user = await dbContext.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
+
+        Assert.Equal(IdentityVerificationStatus.Approved, user.IdentityVerificationStatus);
+        Assert.Equal(PersonaInquiryStatus.Approved, user.PersonaInquiryStatus);
+        Assert.Null(user.VerifiedFirstName);
+        Assert.Null(user.VerifiedLastName);
+        Assert.Null(user.PersonaVerifiedAtUtc);
+        Assert.Single(factory.FakePersona.GetGovernmentIdDataCalls);
+    }
+
+    [Fact]
+    public async Task Webhook_CompletedThenApproved_PersistsVerifiedDataOnceAndDoesNotRefetch()
+    {
+        const string inquiryId = "inq_persona_completed_then_approved";
+        factory.FakePersona.NextCreateInquiryResult = new CreatePersonaInquiryResult
+        {
+            Success = true,
+            InquiryId = inquiryId,
+            InquiryStatus = "created"
+        };
+        factory.FakePersona.NextGovernmentIdDataResult = new PersonaGovernmentIdDataResult
+        {
+            Success = true,
+            FirstName = "Marcus",
+            MiddleName = null,
+            LastName = "Hill",
+            Birthdate = "1988-07-04",
+            LicenseState = "wa"
+        };
+
+        var (token, userId, _) = await SignInAsync();
+        var http = factory.CreateClient();
+        http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        var graphql = new GraphQLClient(http);
+
+        await graphql.SendAsync<JsonElement>(
+            "mutation { startPersonaInquiry { success error } }");
+
+        var completedAt = DateTime.UtcNow;
+        var completedBody = BuildInquiryWebhookBody(inquiryId, "completed", completedAt);
+        var completedResponse = await PostWebhookAsync(completedBody, BuildSignatureHeader(WebhookSecret, completedBody));
+        Assert.Equal(HttpStatusCode.NoContent, completedResponse.StatusCode);
+
+        await using (var checkScope = factory.Services.CreateAsyncScope())
+        {
+            var checkDb = checkScope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
+            var afterCompleted = await checkDb.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
+            Assert.Equal(IdentityVerificationStatus.Completed, afterCompleted.IdentityVerificationStatus);
+            Assert.Equal("Marcus", afterCompleted.VerifiedFirstName);
+            Assert.Null(afterCompleted.VerifiedMiddleName);
+            Assert.Equal("WA", afterCompleted.VerifiedLicenseState);
+        }
+
+        // Swap the fake's payload — if our handler ever re-fetched on the approved transition,
+        // these "Should*" values would leak into the user row, replacing the Marcus/Hill data.
+        factory.FakePersona.NextGovernmentIdDataResult = new PersonaGovernmentIdDataResult
+        {
+            Success = true,
+            FirstName = "ShouldNotOverwrite",
+            LastName = "ShouldNotOverwrite"
+        };
+
+        var approvedBody = BuildInquiryWebhookBody(inquiryId, "approved", completedAt.AddSeconds(5));
+        var approvedResponse = await PostWebhookAsync(approvedBody, BuildSignatureHeader(WebhookSecret, approvedBody));
+        Assert.Equal(HttpStatusCode.NoContent, approvedResponse.StatusCode);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
+        var user = await dbContext.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
+
+        Assert.Equal(IdentityVerificationStatus.Approved, user.IdentityVerificationStatus);
+        Assert.Equal("Marcus", user.VerifiedFirstName);
+        Assert.Equal("Hill", user.VerifiedLastName);
+        Assert.Single(factory.FakePersona.GetGovernmentIdDataCalls);
+    }
+
+    [Fact]
     public async Task Webhook_WithInvalidSignature_Returns401AndDoesNotMutateUser()
     {
         const string inquiryId = "inq_persona_unauthorized";

@@ -56,11 +56,36 @@ public sealed class IdentityVerificationService(
                 user.Id,
                 user.PersonaInquiryStatus);
 
+            // Session tokens are one-time-use, so we mint a fresh one every
+            // time the client asks to launch — even when the inquiry itself
+            // is being reused.
+            var reusedSessionTokenResult = await personaClient.CreateInquirySessionTokenAsync(
+                user.PersonaInquiryId!,
+                cancellationToken);
+
+            if (!reusedSessionTokenResult.Success || string.IsNullOrWhiteSpace(reusedSessionTokenResult.SessionToken))
+            {
+                logger.LogWarning(
+                    "Persona session token mint failed for reused inquiry {InquiryId} (user {UserId}). Error: {Error}",
+                    user.PersonaInquiryId,
+                    user.Id,
+                    reusedSessionTokenResult.Error);
+
+                return new StartPersonaInquiryResult
+                {
+                    Error = reusedSessionTokenResult.Error ?? "Unable to mint a Persona session token for the existing inquiry.",
+                    InquiryId = user.PersonaInquiryId,
+                    IdentityVerificationStatus = user.IdentityVerificationStatus,
+                    PersonaInquiryStatus = user.PersonaInquiryStatus
+                };
+            }
+
             return new StartPersonaInquiryResult
             {
                 Success = true,
                 CreatedNewInquiry = false,
                 InquiryId = user.PersonaInquiryId,
+                SessionToken = reusedSessionTokenResult.SessionToken,
                 IdentityVerificationStatus = user.IdentityVerificationStatus,
                 PersonaInquiryStatus = user.PersonaInquiryStatus
             };
@@ -126,11 +151,33 @@ public sealed class IdentityVerificationService(
             user.Id,
             user.PersonaInquiryStatus);
 
+        var sessionTokenResult = await personaClient.CreateInquirySessionTokenAsync(
+            user.PersonaInquiryId!,
+            cancellationToken);
+
+        if (!sessionTokenResult.Success || string.IsNullOrWhiteSpace(sessionTokenResult.SessionToken))
+        {
+            logger.LogWarning(
+                "Persona session token mint failed for new inquiry {InquiryId} (user {UserId}). Error: {Error}",
+                user.PersonaInquiryId,
+                user.Id,
+                sessionTokenResult.Error);
+
+            return new StartPersonaInquiryResult
+            {
+                Error = sessionTokenResult.Error ?? "Unable to mint a Persona session token for the new inquiry.",
+                InquiryId = user.PersonaInquiryId,
+                IdentityVerificationStatus = user.IdentityVerificationStatus,
+                PersonaInquiryStatus = user.PersonaInquiryStatus
+            };
+        }
+
         return new StartPersonaInquiryResult
         {
             Success = true,
             CreatedNewInquiry = true,
             InquiryId = user.PersonaInquiryId,
+            SessionToken = sessionTokenResult.SessionToken,
             IdentityVerificationStatus = user.IdentityVerificationStatus,
             PersonaInquiryStatus = user.PersonaInquiryStatus
         };
