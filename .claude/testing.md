@@ -57,7 +57,7 @@ Each integration test:
 3. Replaces only the **outbound HTTP boundaries** with deterministic fakes:
    - `FakeEmailSignInSender` — captures sent codes in memory, never hits Resend.
    - `FakeGoogleTokenVerifier` — returns a preset identity instead of validating a real Google JWT.
-   - `FakePersonaClient` — returns canned inquiry / government-id data.
+   - `FakePersonaClient` — returns canned inquiry-creation + session-token responses (verified identity data is now read inline from the synthesized webhook body, not from this client).
    - `FakeCheckrTrustClient` — returns canned check / profile responses.
 4. Calls the API the same way the frontend will — POST `/graphql` with JSON.
 

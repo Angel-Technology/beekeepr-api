@@ -36,15 +36,6 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
             InquiryId = inquiryId,
             InquiryStatus = "created"
         };
-        factory.FakePersona.NextGovernmentIdDataResult = new PersonaGovernmentIdDataResult
-        {
-            Success = true,
-            FirstName = "Jane",
-            MiddleName = "Quinn",
-            LastName = "Doe",
-            Birthdate = "1990-01-01",
-            LicenseState = "ca"
-        };
 
         var (token, userId, _) = await SignInAsync();
         var http = factory.CreateClient();
@@ -54,7 +45,14 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
         await graphql.SendAsync<JsonElement>(
             "mutation { startPersonaInquiry { success inquiryId error } }");
 
-        var webhookBody = BuildInquiryWebhookBody(inquiryId, "approved");
+        var webhookBody = BuildInquiryWebhookBodyWithInlineFields(
+            inquiryId,
+            status: "approved",
+            nameFirst: "Jane",
+            nameMiddle: "Quinn",
+            nameLast: "Doe",
+            birthdate: "1990-01-01",
+            issuingAuthority: "ca");
         var signatureHeader = BuildSignatureHeader(WebhookSecret, webhookBody);
 
         var webhookResponse = await PostWebhookAsync(webhookBody, signatureHeader);
@@ -84,14 +82,6 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
             InquiryId = inquiryId,
             InquiryStatus = "created"
         };
-        factory.FakePersona.NextGovernmentIdDataResult = new PersonaGovernmentIdDataResult
-        {
-            Success = true,
-            FirstName = "Sienna",
-            LastName = "Park",
-            Birthdate = "1992-05-12",
-            LicenseState = "ny"
-        };
 
         var (token, userId, email) = await SignInAsync();
 
@@ -104,7 +94,14 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
         await graphql.SendAsync<JsonElement>(
             "mutation { startPersonaInquiry { success error } }");
 
-        var webhookBody = BuildInquiryWebhookBody(inquiryId, "approved");
+        var webhookBody = BuildInquiryWebhookBodyWithInlineFields(
+            inquiryId,
+            status: "approved",
+            nameFirst: "Sienna",
+            nameMiddle: null,
+            nameLast: "Park",
+            birthdate: "1992-05-12",
+            issuingAuthority: "ny");
         var webhookResponse = await PostWebhookAsync(webhookBody, BuildSignatureHeader(WebhookSecret, webhookBody));
         Assert.Equal(HttpStatusCode.NoContent, webhookResponse.StatusCode);
 
@@ -181,12 +178,6 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
             InquiryId = inquiryId,
             InquiryStatus = "created"
         };
-        factory.FakePersona.NextGovernmentIdDataResult = new PersonaGovernmentIdDataResult
-        {
-            Success = true,
-            FirstName = "Approved",
-            LastName = "User"
-        };
 
         var (token, userId, _) = await SignInAsync();
         var http = factory.CreateClient();
@@ -197,12 +188,31 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
             "mutation { startPersonaInquiry { success error } }");
 
         var approvedAt = DateTime.UtcNow;
-        var approvedBody = BuildInquiryWebhookBody(inquiryId, "approved", approvedAt);
+        var approvedBody = BuildInquiryWebhookBodyWithInlineFields(
+            inquiryId,
+            status: "approved",
+            nameFirst: "Approved",
+            nameMiddle: null,
+            nameLast: "User",
+            birthdate: null,
+            issuingAuthority: null,
+            inquiryUpdatedAtUtc: approvedAt);
         var approvedResponse = await PostWebhookAsync(approvedBody, BuildSignatureHeader(WebhookSecret, approvedBody));
         Assert.Equal(HttpStatusCode.NoContent, approvedResponse.StatusCode);
 
+        // The stale completed event also carries inline fields with different sentinel values —
+        // if the watermark check ever broke and we reprocessed, the user row would be overwritten
+        // with these "Stale_*" names instead of staying on the original "Approved/User" data.
         var staleCompletedAt = approvedAt.AddSeconds(-30);
-        var staleBody = BuildInquiryWebhookBody(inquiryId, "completed", staleCompletedAt);
+        var staleBody = BuildInquiryWebhookBodyWithInlineFields(
+            inquiryId,
+            status: "completed",
+            nameFirst: "Stale_FirstName",
+            nameMiddle: null,
+            nameLast: "Stale_LastName",
+            birthdate: null,
+            issuingAuthority: null,
+            inquiryUpdatedAtUtc: staleCompletedAt);
         var staleResponse = await PostWebhookAsync(staleBody, BuildSignatureHeader(WebhookSecret, staleBody));
         Assert.Equal(HttpStatusCode.NoContent, staleResponse.StatusCode);
 
@@ -212,8 +222,8 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
 
         Assert.Equal(IdentityVerificationStatus.Approved, user.IdentityVerificationStatus);
         Assert.Equal(PersonaInquiryStatus.Approved, user.PersonaInquiryStatus);
-
-        Assert.Single(factory.FakePersona.GetGovernmentIdDataCalls);
+        Assert.Equal("Approved", user.VerifiedFirstName);
+        Assert.Equal("User", user.VerifiedLastName);
     }
 
     [Fact]
@@ -344,21 +354,14 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Webhook_DeclinedInquiry_SetsDeclinedAndDoesNotFetchVerifiedData()
+    public async Task Webhook_WithInlineFields_PersistsFromWebhook()
     {
-        const string inquiryId = "inq_persona_declined";
+        const string inquiryId = "inq_persona_inline_fields";
         factory.FakePersona.NextCreateInquiryResult = new CreatePersonaInquiryResult
         {
             Success = true,
             InquiryId = inquiryId,
             InquiryStatus = "created"
-        };
-        // If our handler ever wrongly fetched on Declined, this would leak into the user row.
-        factory.FakePersona.NextGovernmentIdDataResult = new PersonaGovernmentIdDataResult
-        {
-            Success = true,
-            FirstName = "ShouldNotBeUsed",
-            LastName = "ShouldNotBeUsed"
         };
 
         var (token, userId, _) = await SignInAsync();
@@ -369,7 +372,61 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
         await graphql.SendAsync<JsonElement>(
             "mutation { startPersonaInquiry { success error } }");
 
-        var webhookBody = BuildInquiryWebhookBody(inquiryId, "declined");
+        var webhookBody = BuildInquiryWebhookBodyWithInlineFields(
+            inquiryId,
+            status: "approved",
+            nameFirst: "ALEXANDER J",
+            nameMiddle: null,
+            nameLast: "SAMPLE",
+            birthdate: "1977-07-17",
+            issuingAuthority: "ca");
+
+        var response = await PostWebhookAsync(webhookBody, BuildSignatureHeader(WebhookSecret, webhookBody));
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
+        var user = await dbContext.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
+
+        Assert.Equal(IdentityVerificationStatus.Approved, user.IdentityVerificationStatus);
+        Assert.Equal("ALEXANDER J", user.VerifiedFirstName);
+        Assert.Null(user.VerifiedMiddleName);
+        Assert.Equal("SAMPLE", user.VerifiedLastName);
+        Assert.Equal("1977-07-17", user.VerifiedBirthdate);
+        Assert.Equal("CA", user.VerifiedLicenseState);
+        Assert.NotNull(user.PersonaVerifiedAtUtc);
+    }
+
+    [Fact]
+    public async Task Webhook_DeclinedInquiry_SetsDeclinedAndDoesNotPersistVerifiedFields()
+    {
+        const string inquiryId = "inq_persona_declined";
+        factory.FakePersona.NextCreateInquiryResult = new CreatePersonaInquiryResult
+        {
+            Success = true,
+            InquiryId = inquiryId,
+            InquiryStatus = "created"
+        };
+
+        var (token, userId, _) = await SignInAsync();
+        var http = factory.CreateClient();
+        http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        var graphql = new GraphQLClient(http);
+
+        await graphql.SendAsync<JsonElement>(
+            "mutation { startPersonaInquiry { success error } }");
+
+        // Even when the declined webhook carries inline fields (sentinel "Should*" values),
+        // they must NOT land on the user row — verified data is only persisted on
+        // Approved/Completed transitions, never on Declined.
+        var webhookBody = BuildInquiryWebhookBodyWithInlineFields(
+            inquiryId,
+            status: "declined",
+            nameFirst: "ShouldNotBeUsed",
+            nameMiddle: null,
+            nameLast: "ShouldNotBeUsed",
+            birthdate: "1990-01-01",
+            issuingAuthority: "ca");
         var response = await PostWebhookAsync(webhookBody, BuildSignatureHeader(WebhookSecret, webhookBody));
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
 
@@ -382,25 +439,20 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
         Assert.Null(user.VerifiedFirstName);
         Assert.Null(user.VerifiedLastName);
         Assert.Null(user.PersonaVerifiedAtUtc);
-        Assert.Empty(factory.FakePersona.GetGovernmentIdDataCalls);
     }
 
     [Fact]
-    public async Task Webhook_ApprovedButGovernmentIdFetchFails_LeavesVerifiedFieldsNull()
+    public async Task Webhook_ApprovedWithoutInlineFields_FlipsStatusButLeavesVerifiedFieldsNull()
     {
-        // Pins the documented sharp edge: if Persona's GET /verifications/government-id call fails
-        // at webhook time, we still flip the user to Approved but VerifiedFirstName stays null and
-        // PersonaVerifiedAtUtc is not stamped. A reconciliation job (not yet built) would fix this.
-        const string inquiryId = "inq_persona_approved_fetch_fails";
+        // Templates that don't include a government-ID step won't surface inline fields. We still
+        // honor the status transition (user becomes Approved) but VerifiedFirstName stays null and
+        // PersonaVerifiedAtUtc isn't stamped — there's nothing to persist.
+        const string inquiryId = "inq_persona_approved_no_fields";
         factory.FakePersona.NextCreateInquiryResult = new CreatePersonaInquiryResult
         {
             Success = true,
             InquiryId = inquiryId,
             InquiryStatus = "created"
-        };
-        factory.FakePersona.NextGovernmentIdDataResult = new PersonaGovernmentIdDataResult
-        {
-            Success = false
         };
 
         var (token, userId, _) = await SignInAsync();
@@ -424,7 +476,6 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
         Assert.Null(user.VerifiedFirstName);
         Assert.Null(user.VerifiedLastName);
         Assert.Null(user.PersonaVerifiedAtUtc);
-        Assert.Single(factory.FakePersona.GetGovernmentIdDataCalls);
     }
 
     [Fact]
@@ -437,16 +488,6 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
             InquiryId = inquiryId,
             InquiryStatus = "created"
         };
-        factory.FakePersona.NextGovernmentIdDataResult = new PersonaGovernmentIdDataResult
-        {
-            Success = true,
-            FirstName = "Marcus",
-            MiddleName = null,
-            LastName = "Hill",
-            Birthdate = "1988-07-04",
-            LicenseState = "wa"
-        };
-
         var (token, userId, _) = await SignInAsync();
         var http = factory.CreateClient();
         http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
@@ -456,7 +497,15 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
             "mutation { startPersonaInquiry { success error } }");
 
         var completedAt = DateTime.UtcNow;
-        var completedBody = BuildInquiryWebhookBody(inquiryId, "completed", completedAt);
+        var completedBody = BuildInquiryWebhookBodyWithInlineFields(
+            inquiryId,
+            status: "completed",
+            nameFirst: "Marcus",
+            nameMiddle: null,
+            nameLast: "Hill",
+            birthdate: "1988-07-04",
+            issuingAuthority: "wa",
+            inquiryUpdatedAtUtc: completedAt);
         var completedResponse = await PostWebhookAsync(completedBody, BuildSignatureHeader(WebhookSecret, completedBody));
         Assert.Equal(HttpStatusCode.NoContent, completedResponse.StatusCode);
 
@@ -470,16 +519,18 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
             Assert.Equal("WA", afterCompleted.VerifiedLicenseState);
         }
 
-        // Swap the fake's payload — if our handler ever re-fetched on the approved transition,
-        // these "Should*" values would leak into the user row, replacing the Marcus/Hill data.
-        factory.FakePersona.NextGovernmentIdDataResult = new PersonaGovernmentIdDataResult
-        {
-            Success = true,
-            FirstName = "ShouldNotOverwrite",
-            LastName = "ShouldNotOverwrite"
-        };
-
-        var approvedBody = BuildInquiryWebhookBody(inquiryId, "approved", completedAt.AddSeconds(5));
+        // The approved webhook also carries inline fields with sentinel "ShouldNotOverwrite"
+        // values. Because verifiedDataAlreadyPresent short-circuits the persistence step, those
+        // sentinels must NOT replace the Marcus/Hill data already on the user row.
+        var approvedBody = BuildInquiryWebhookBodyWithInlineFields(
+            inquiryId,
+            status: "approved",
+            nameFirst: "ShouldNotOverwrite",
+            nameMiddle: null,
+            nameLast: "ShouldNotOverwrite",
+            birthdate: null,
+            issuingAuthority: null,
+            inquiryUpdatedAtUtc: completedAt.AddSeconds(5));
         var approvedResponse = await PostWebhookAsync(approvedBody, BuildSignatureHeader(WebhookSecret, approvedBody));
         Assert.Equal(HttpStatusCode.NoContent, approvedResponse.StatusCode);
 
@@ -490,7 +541,6 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
         Assert.Equal(IdentityVerificationStatus.Approved, user.IdentityVerificationStatus);
         Assert.Equal("Marcus", user.VerifiedFirstName);
         Assert.Equal("Hill", user.VerifiedLastName);
-        Assert.Single(factory.FakePersona.GetGovernmentIdDataCalls);
     }
 
     [Fact]
@@ -565,11 +615,57 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
         return JsonSerializer.Serialize(payload);
     }
 
+    private static string BuildInquiryWebhookBodyWithInlineFields(
+        string inquiryId,
+        string status,
+        string? nameFirst,
+        string? nameMiddle,
+        string? nameLast,
+        string? birthdate,
+        string? issuingAuthority,
+        DateTime? inquiryUpdatedAtUtc = null)
+    {
+        var updatedAt = (inquiryUpdatedAtUtc ?? DateTime.UtcNow).ToString("o");
+        var payload = new
+        {
+            data = new
+            {
+                attributes = new
+                {
+                    name = $"inquiry.{status}",
+                    payload = new
+                    {
+                        data = new
+                        {
+                            type = "inquiry",
+                            id = inquiryId,
+                            attributes = new Dictionary<string, object?>
+                            {
+                                ["status"] = status,
+                                ["updated_at"] = updatedAt,
+                                ["fields"] = new Dictionary<string, object?>
+                                {
+                                    ["name_first"] = new { type = "string", value = nameFirst },
+                                    ["name_middle"] = new { type = "string", value = nameMiddle },
+                                    ["name_last"] = new { type = "string", value = nameLast },
+                                    ["birthdate"] = new { type = "date", value = birthdate },
+                                    ["issuing_authority"] = new { type = "string", value = issuingAuthority }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+        return JsonSerializer.Serialize(payload);
+    }
+
     private static string BuildSignatureHeader(string secret, string body)
     {
+        // Must mirror Persona's real signing payload: `${timestamp}.${rawBody}`.
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
-        var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes($"{body}.{timestamp}"));
+        var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes($"{timestamp}.{body}"));
         var hex = Convert.ToHexString(hash).ToLowerInvariant();
         return $"t={timestamp},v1={hex}";
     }

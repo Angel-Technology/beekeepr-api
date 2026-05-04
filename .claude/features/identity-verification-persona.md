@@ -12,7 +12,7 @@ Lifecycle (typical auto-approval template):
 User opens Persona SDK
   │  webhook: inquiry.started        → status Pending
 User submits ID + selfie, SDK fires onComplete
-  │  webhook: inquiry.completed      → status Completed (verified data fetched)
+  │  webhook: inquiry.completed      → status Completed (verified fields read inline from webhook)
 Persona runs OCR / face-match / liveness / watchlist
   │  webhook: inquiry.approved       → status Approved   (1–10s after completed)
   │      OR
@@ -26,7 +26,7 @@ Backend behavior at each stage:
 1. `startPersonaInquiry` (GraphQL mutation) — backend either creates a fresh inquiry on Persona (`inq_…`) or reuses an existing in-progress one if it's in a retryable state. **Subscription gate** fires here on the create-new-inquiry path — see below.
 2. Frontend opens the Persona SDK with the returned `inquiryId`. Backend has no involvement until the webhooks land.
 3. Persona POSTs to `/webhooks/persona` for each status transition. Backend verifies the HMAC signature, checks the event isn't stale (timestamp comparison), maps the status, and persists.
-4. On `Completed` or `Approved` (whichever lands first with verified data not yet present), backend fetches government-ID data from Persona and persists `verified_*` fields plus `persona_verified_at_utc`.
+4. On `Completed` or `Approved` (whichever lands first with verified data not yet present), backend reads the OCR'd fields **inline from the webhook payload** (`payload.data.attributes.fields`) and persists `verified_*` columns plus `persona_verified_at_utc`. No outbound API call to Persona.
 
 ## Subscription gate
 
@@ -55,11 +55,11 @@ Everything lives directly on `users`. Migrations:
 | `persona_inquiry_status` | Mirrors Persona's own vocabulary; for debugging, not for UI logic |
 | `persona_inquiry_updated_at_utc` | Watermark — last `updated-at` we processed from Persona; used to drop stale/replayed webhooks |
 | `persona_verified_at_utc` | Timestamp when verified data was first persisted |
-| `verified_first_name` | From Persona's `name-first` |
-| `verified_middle_name` | From Persona's `name-middle` (may be null) |
-| `verified_last_name` | From Persona's `name-last` |
-| `verified_birthdate` | From Persona's `birthdate` (kept as-string, generally `YYYY-MM-DD`) |
-| `verified_license_state` | From Persona's `issuing-subdivision` (the state that issued the ID), normalized to upper-case 2-letter code where applicable. Used as Checkr's `source_states` filter |
+| `verified_first_name` | From the webhook's inline `fields.name_first` |
+| `verified_middle_name` | From the webhook's inline `fields.name_middle` (may be null) |
+| `verified_last_name` | From the webhook's inline `fields.name_last` |
+| `verified_birthdate` | From the webhook's inline `fields.birthdate` (kept as-string, generally `YYYY-MM-DD`) |
+| `verified_license_state` | From the webhook's inline `fields.issuing_authority` (the state that issued the ID), normalized to upper-case 2-letter code where applicable. Used as Checkr's `source_states` filter |
 | `phone_number` | **Not from Persona.** User-supplied via the frontend. Used as Checkr's `phone` field |
 
 ## GraphQL surface
@@ -113,7 +113,7 @@ Frontend should branch on `identityVerificationStatus`. The Persona-flavored fie
 
 Persona delivers events in a queue and **may retry on any 5xx** (or after a slow 2xx). Two failure modes that ordering-naive handlers hit:
 
-1. **Replayed events** — same event delivered twice. A naive handler re-fetches government-ID data and re-stamps `persona_verified_at_utc` on every replay, doubling Persona API calls.
+1. **Replayed events** — same event delivered twice. A naive handler re-stamps `persona_verified_at_utc` on every replay.
 2. **Out-of-order events** — `approved` arrives, then a re-delivery of an older `completed` lands. A naive handler would downgrade the user from Approved back to Completed.
 
 Our handler defends against both via a **monotonic watermark**:
@@ -122,7 +122,7 @@ Our handler defends against both via a **monotonic watermark**:
 - If the incoming timestamp is `≤` the stored `persona_inquiry_updated_at_utc`, we log and return without mutating anything.
 - Otherwise we apply the new status and bump the watermark.
 
-We also avoid re-fetching verified data if it's already persisted (`verified_first_name` non-null) — this prevents the `completed → approved` transition from making a second `GET /verifications/government-id/...` call to Persona.
+We also avoid re-persisting verified data if it's already on the row (`verified_first_name` non-null) — this prevents the `completed → approved` transition from re-stamping `persona_verified_at_utc` (and protects against any future webhook payload drift overwriting good data).
 
 ### Side effect: deferred welcome email
 
@@ -158,13 +158,14 @@ Always re-fetch `currentUser` on app focus / resume — there's no push-to-clien
 
 - **Persona API** (`api.withpersona.com`):
   - Create inquiry — `POST /api/v1/inquiries`
-  - List verifications on an inquiry — `GET /api/v1/inquiries/{id}?include=verifications`
-  - Read government-ID verification — `GET /api/v1/verifications/government-id/{verifId}`
+  - Mint session token to resume inquiry from the SDK — `POST /api/v1/inquiries/{id}/resume`
 - Required config (`appsettings.json` → `Persona:` section):
   - `ApiKey` (user-secret)
   - `ApiBaseUrl` — defaults to `https://api.withpersona.com`
   - `InquiryTemplateId` (the `itmpl_…` template id for your KYC flow)
   - `WebhookSecrets` (array of strings — for HMAC verification, supports rotation)
+
+We deliberately do **not** call `GET /api/v1/inquiries/{id}` or `GET /api/v1/verifications/...` to fetch verified fields — the inquiry's `fields` block is delivered inline on the webhook itself. This keeps webhook handling network-free post-signature-check and removes the "Approved with empty `verified_*`" failure mode from the old API path. **Tradeoff:** templates that don't surface inline fields (database-verification-only, selfie-only, etc.) won't populate `verified_*` columns. If you ever switch to such a template, restore an API-fetch fallback or the columns will stay null.
 
 ## Files to watch
 
@@ -174,14 +175,14 @@ Always re-fetch `currentUser` on app focus / resume — there's no push-to-clien
 - `BuzzKeepr.Domain/Enums/PersonaInquiryStatus.cs`
 
 ### Application
-- `BuzzKeepr.Application/IdentityVerification/IdentityVerificationService.cs`
+- `BuzzKeepr.Application/IdentityVerification/IdentityVerificationService.cs` (parses inline `fields` in `TryReadInlineGovernmentIdData`)
 - `BuzzKeepr.Application/IdentityVerification/IIdentityVerificationService.cs`
 - `BuzzKeepr.Application/IdentityVerification/IIdentityVerificationRepository.cs`
-- `BuzzKeepr.Application/IdentityVerification/IPersonaClient.cs`
+- `BuzzKeepr.Application/IdentityVerification/IPersonaClient.cs` (SDK-facing only — create inquiry + mint session token)
 - `BuzzKeepr.Application/IdentityVerification/Models/CreatePersonaInquiryInput.cs`
 - `BuzzKeepr.Application/IdentityVerification/Models/CreatePersonaInquiryResult.cs`
 - `BuzzKeepr.Application/IdentityVerification/Models/StartPersonaInquiryResult.cs`
-- `BuzzKeepr.Application/IdentityVerification/Models/PersonaGovernmentIdDataResult.cs`
+- `BuzzKeepr.Application/IdentityVerification/Models/PersonaGovernmentIdDataResult.cs` (DTO produced by inline parser)
 
 ### Infrastructure
 - `BuzzKeepr.Infrastructure/IdentityVerification/PersonaClient.cs`
@@ -203,7 +204,8 @@ Always re-fetch `currentUser` on app focus / resume — there's no push-to-clien
 - **Webhook secrets are an array.** The verifier tries every entry. Rotate by appending the new secret, deploying, then removing the old.
 - **Reuse before recreate.** `startPersonaInquiry` reuses the existing inquiry unless its `identity_verification_status` is `Declined`, `Expired`, or `Failed` (the `RetryableStatuses` set).
 - **Webhooks are async + retried + out-of-order-capable.** Always go through the `persona_inquiry_updated_at_utc` watermark check before mutating. Never assume the latest webhook is the most recent state.
-- **`Completed` ≠ `Approved`.** Verified data may be present at `Completed` but the user isn't actually approved yet. UI gates on `Approved`.
+- **`Completed` ≠ `Approved`.** Verified data is present at `Completed` (we read it inline from that webhook) but the user isn't actually approved yet. UI gates on `Approved`.
+- **Verified data comes from the webhook, not an API call.** Persona embeds OCR'd identity fields under `payload.data.attributes.fields`. We parse them inline and persist directly. Never reintroduce a `GET /verifications/...` round-trip without a real reason — it doubles latency, adds a failure mode, and races the watermark.
 - **Store only what Checkr needs.** The Verified columns are deliberately scoped to first/middle/last/dob/license-state — anything else (address, license number, expiration) gets dropped on the floor. If a future feature needs more, add a column then; don't speculatively persist.
 - **Phone is not from Persona.** Persona doesn't capture it; the frontend collects it through a separate profile flow and writes to `phone_number`. Treat it like any other user-claimed field — no verification.
 - **No exceptions for business outcomes.** Webhook handler returns 204 once the signature is valid; business issues are logged + reflected in status.
@@ -220,8 +222,7 @@ Always re-fetch `currentUser` on app focus / resume — there's no push-to-clien
 
 ## Known TODOs / sharp edges
 
-- **No retry on government-ID fetch.** `GetGovernmentIdDataAsync` returns `Success=false` on any HTTP failure and we silently skip. If Persona is briefly down at webhook time, we end up `Approved` with empty `verified_*` columns. Add a retry / reconciliation job if this becomes a real problem.
+- **Template-locked to inline-fields delivery.** Verified data is read from the webhook's `fields` block. Templates that don't include a government-ID step (database-verification-only, selfie-only, etc.) won't surface those fields, so the user lands as `Approved` with empty `verified_*` columns. If you change templates, either add the government-ID step to the new template or restore an API-fetch fallback in `ProcessPersonaWebhookAsync`.
 - **Race between `startPersonaInquiry` save and an early webhook.** If Persona webhooks land before our local SaveChanges committed `PersonaInquiryId`, the handler logs "unknown inquiry" and bails. Persona's webhook lag (≥1s) makes this unlikely in practice.
-- **`FindPassedGovernmentIdVerificationId` picks the first passing verification.** If a template ever runs multiple government-ID checks (e.g. SDK retry produces several `verification/government-id` items), we take the first array entry with `status` in (`passed`, `completed`). Almost always fine; sanity-check the actual response shape if your template changes.
 - **No dedicated `persona_inquiries` table.** If we ever want history (multiple attempts, audit trail across retries), this becomes a real schema change.
 - **Watermark uses Persona's clock.** If Persona's `updated-at` ever drifts backward (shouldn't, but stranger things have happened), we'd lose updates. Acceptable risk.

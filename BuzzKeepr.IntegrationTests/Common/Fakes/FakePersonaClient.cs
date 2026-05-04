@@ -12,11 +12,6 @@ public sealed class FakePersonaClient : IPersonaClient
         InquiryStatus = "created"
     };
 
-    public PersonaGovernmentIdDataResult NextGovernmentIdDataResult { get; set; } = new()
-    {
-        Success = false
-    };
-
     public CreatePersonaSessionTokenResult NextCreateSessionTokenResult { get; set; } = new()
     {
         Success = true,
@@ -24,7 +19,6 @@ public sealed class FakePersonaClient : IPersonaClient
     };
 
     public List<CreatePersonaInquiryInput> CreateInquiryCalls { get; } = new();
-    public List<string> GetGovernmentIdDataCalls { get; } = new();
     public List<string> CreateSessionTokenCalls { get; } = new();
 
     public Task<CreatePersonaInquiryResult> CreateInquiryAsync(
@@ -41,13 +35,5 @@ public sealed class FakePersonaClient : IPersonaClient
     {
         CreateSessionTokenCalls.Add(inquiryId);
         return Task.FromResult(NextCreateSessionTokenResult);
-    }
-
-    public Task<PersonaGovernmentIdDataResult> GetGovernmentIdDataAsync(
-        string inquiryId,
-        CancellationToken cancellationToken)
-    {
-        GetGovernmentIdDataCalls.Add(inquiryId);
-        return Task.FromResult(NextGovernmentIdDataResult);
     }
 }

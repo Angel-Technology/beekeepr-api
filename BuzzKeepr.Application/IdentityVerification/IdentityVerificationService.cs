@@ -22,6 +22,16 @@ public sealed class IdentityVerificationService(
         IdentityVerificationStatus.Failed
     ];
 
+    // Statuses where the SDK can still meaningfully launch — i.e., the user
+    // either hasn't started Persona or bailed mid-flow. Anything else
+    // (Approved, Completed, NeedsReview) means the user already did their
+    // part; calling Persona's `/resume` for those returns 409 by design.
+    private static readonly HashSet<IdentityVerificationStatus> SdkLaunchableStatuses =
+    [
+        IdentityVerificationStatus.Created,
+        IdentityVerificationStatus.Pending
+    ];
+
     // Calendar months, not a fixed TimeSpan, because "3 months" reads naturally on a profile
     // ("Verified through Oct 2026") and we use DateTime.AddMonths to handle month-length variance.
     // For active subscribers, BackgroundCheckRenewalBackgroundService re-runs the check every cycle
@@ -55,6 +65,29 @@ public sealed class IdentityVerificationService(
                 user.PersonaInquiryId,
                 user.Id,
                 user.PersonaInquiryStatus);
+
+            // Don't try to mint a session token for an inquiry the user has
+            // already submitted (Approved/Completed/NeedsReview). Persona's
+            // `/resume` 409s on those, and there's no SDK launch needed —
+            // just hand the client a refreshed status and let it route.
+            if (!SdkLaunchableStatuses.Contains(user.IdentityVerificationStatus))
+            {
+                logger.LogInformation(
+                    "Skipping Persona SDK launch for user {UserId}: status is {IdentityStatus}, no further user action needed.",
+                    user.Id,
+                    user.IdentityVerificationStatus);
+
+                return new StartPersonaInquiryResult
+                {
+                    Success = true,
+                    CreatedNewInquiry = false,
+                    InquiryId = user.PersonaInquiryId,
+                    // Intentionally no SessionToken — the client treats this
+                    // as "no SDK launch required, just refresh".
+                    IdentityVerificationStatus = user.IdentityVerificationStatus,
+                    PersonaInquiryStatus = user.PersonaInquiryStatus
+                };
+            }
 
             // Session tokens are one-time-use, so we mint a fresh one every
             // time the client asks to launch — even when the inquiry itself
@@ -187,7 +220,12 @@ public sealed class IdentityVerificationService(
     {
         using var document = JsonDocument.Parse(rawRequestBody);
 
-        if (!TryExtractInquiryPayload(document.RootElement, out var inquiryId, out var inquiryStatus, out var inquiryUpdatedAtUtc))
+        if (!TryExtractInquiryPayload(
+                document.RootElement,
+                out var inquiryId,
+                out var inquiryStatus,
+                out var inquiryUpdatedAtUtc,
+                out var inlineGovernmentIdData))
         {
             logger.LogWarning("Persona webhook payload did not contain an inquiry id and status.");
             return;
@@ -222,24 +260,19 @@ public sealed class IdentityVerificationService(
         if (inquiryUpdatedAtUtc.HasValue)
             user.PersonaInquiryUpdatedAtUtc = inquiryUpdatedAtUtc.Value;
 
-        var shouldFetchVerifiedData = newIdentityStatus
+        var shouldPersistVerifiedData = newIdentityStatus
                 is IdentityVerificationStatus.Approved
                 or IdentityVerificationStatus.Completed
             && !verifiedDataAlreadyPresent;
 
-        if (shouldFetchVerifiedData)
+        if (shouldPersistVerifiedData && inlineGovernmentIdData is { Success: true })
         {
-            var governmentIdData = await personaClient.GetGovernmentIdDataAsync(inquiryId, cancellationToken);
-
-            if (governmentIdData.Success)
-            {
-                user.VerifiedFirstName = governmentIdData.FirstName;
-                user.VerifiedMiddleName = governmentIdData.MiddleName;
-                user.VerifiedLastName = governmentIdData.LastName;
-                user.VerifiedBirthdate = governmentIdData.Birthdate;
-                user.VerifiedLicenseState = NormalizeStateCode(governmentIdData.LicenseState);
-                user.PersonaVerifiedAtUtc = DateTime.UtcNow;
-            }
+            user.VerifiedFirstName = inlineGovernmentIdData.FirstName;
+            user.VerifiedMiddleName = inlineGovernmentIdData.MiddleName;
+            user.VerifiedLastName = inlineGovernmentIdData.LastName;
+            user.VerifiedBirthdate = inlineGovernmentIdData.Birthdate;
+            user.VerifiedLicenseState = NormalizeStateCode(inlineGovernmentIdData.LicenseState);
+            user.PersonaVerifiedAtUtc = DateTime.UtcNow;
         }
 
         // Email-sign-in users have no display name when they sign up, so the welcome email
@@ -353,11 +386,13 @@ public sealed class IdentityVerificationService(
         JsonElement root,
         out string inquiryId,
         out PersonaInquiryStatus inquiryStatus,
-        out DateTime? inquiryUpdatedAtUtc)
+        out DateTime? inquiryUpdatedAtUtc,
+        out PersonaGovernmentIdDataResult? inlineGovernmentIdData)
     {
         inquiryId = string.Empty;
         inquiryStatus = default;
         inquiryUpdatedAtUtc = null;
+        inlineGovernmentIdData = null;
 
         if (!root.TryGetProperty("data", out var eventData)
             || !eventData.TryGetProperty("attributes", out var eventAttributes)
@@ -388,7 +423,54 @@ public sealed class IdentityVerificationService(
 
         inquiryStatus = MapPersonaInquiryStatus(rawInquiryStatus);
         inquiryUpdatedAtUtc = TryReadInquiryUpdatedAt(inquiryAttributes, eventAttributes);
+        inlineGovernmentIdData = TryReadInlineGovernmentIdData(inquiryAttributes);
         return true;
+    }
+
+    private static PersonaGovernmentIdDataResult? TryReadInlineGovernmentIdData(JsonElement inquiryAttributes)
+    {
+        // Inquiry templates that include a government-ID step embed the extracted fields under
+        // `attributes.fields` as `{ type, value }` pairs. The webhook payload includes these
+        // verbatim, so we can persist without calling Persona's API. Templates that don't
+        // collect government ID will be missing these keys — return null and let the caller
+        // fall back to the verifications API.
+        if (!inquiryAttributes.TryGetProperty("fields", out var fields)
+            || fields.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var firstName = ReadFieldStringValue(fields, "name_first");
+        var lastName = ReadFieldStringValue(fields, "name_last");
+
+        if (string.IsNullOrWhiteSpace(firstName) && string.IsNullOrWhiteSpace(lastName))
+            return null;
+
+        return new PersonaGovernmentIdDataResult
+        {
+            Success = true,
+            FirstName = firstName,
+            MiddleName = ReadFieldStringValue(fields, "name_middle"),
+            LastName = lastName,
+            Birthdate = ReadFieldStringValue(fields, "birthdate"),
+            // `issuing_authority` is the state/country that issued the ID — same semantic as
+            // the verification API's `issuing-subdivision`. For US driver's licenses this is
+            // a 2-letter state code which downstream Checkr uses as `source_states`.
+            LicenseState = ReadFieldStringValue(fields, "issuing_authority")
+        };
+    }
+
+    private static string? ReadFieldStringValue(JsonElement fields, string fieldName)
+    {
+        if (!fields.TryGetProperty(fieldName, out var field)
+            || field.ValueKind != JsonValueKind.Object
+            || !field.TryGetProperty("value", out var value)
+            || value.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        return value.GetString()?.Trim();
     }
 
     private static DateTime? TryReadInquiryUpdatedAt(JsonElement inquiryAttributes, JsonElement eventAttributes)

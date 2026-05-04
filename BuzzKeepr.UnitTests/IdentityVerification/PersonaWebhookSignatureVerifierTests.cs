@@ -80,8 +80,9 @@ public sealed class PersonaWebhookSignatureVerifierTests
 
     private static string ComputeSignature(string secret, string body, string timestamp)
     {
+        // Persona's real format is `${timestamp}.${body}` — keep this in sync with the verifier.
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
-        var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes($"{body}.{timestamp}"));
+        var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes($"{timestamp}.{body}"));
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 }

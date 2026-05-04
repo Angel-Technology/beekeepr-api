@@ -16,8 +16,4 @@ public interface IPersonaClient
     Task<CreatePersonaSessionTokenResult> CreateInquirySessionTokenAsync(
         string inquiryId,
         CancellationToken cancellationToken);
-
-    Task<PersonaGovernmentIdDataResult> GetGovernmentIdDataAsync(
-        string inquiryId,
-        CancellationToken cancellationToken);
 }
