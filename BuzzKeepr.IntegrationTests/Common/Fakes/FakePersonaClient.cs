@@ -12,13 +12,14 @@ public sealed class FakePersonaClient : IPersonaClient
         InquiryStatus = "created"
     };
 
-    public PersonaGovernmentIdDataResult NextGovernmentIdDataResult { get; set; } = new()
+    public CreatePersonaSessionTokenResult NextCreateSessionTokenResult { get; set; } = new()
     {
-        Success = false
+        Success = true,
+        SessionToken = "sess_test_default"
     };
 
     public List<CreatePersonaInquiryInput> CreateInquiryCalls { get; } = new();
-    public List<string> GetGovernmentIdDataCalls { get; } = new();
+    public List<string> CreateSessionTokenCalls { get; } = new();
 
     public Task<CreatePersonaInquiryResult> CreateInquiryAsync(
         CreatePersonaInquiryInput input,
@@ -28,11 +29,11 @@ public sealed class FakePersonaClient : IPersonaClient
         return Task.FromResult(NextCreateInquiryResult);
     }
 
-    public Task<PersonaGovernmentIdDataResult> GetGovernmentIdDataAsync(
+    public Task<CreatePersonaSessionTokenResult> CreateInquirySessionTokenAsync(
         string inquiryId,
         CancellationToken cancellationToken)
     {
-        GetGovernmentIdDataCalls.Add(inquiryId);
-        return Task.FromResult(NextGovernmentIdDataResult);
+        CreateSessionTokenCalls.Add(inquiryId);
+        return Task.FromResult(NextCreateSessionTokenResult);
     }
 }

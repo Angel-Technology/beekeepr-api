@@ -299,6 +299,7 @@ public sealed class UserMutations
             Success = result.Success,
             CreatedNewInquiry = result.CreatedNewInquiry,
             InquiryId = result.InquiryId,
+            SessionToken = result.SessionToken,
             IdentityVerificationStatus = result.IdentityVerificationStatus,
             PersonaInquiryStatus = result.PersonaInquiryStatus,
             SubscriptionRequired = result.SubscriptionRequired,
