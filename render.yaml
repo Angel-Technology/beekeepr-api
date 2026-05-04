@@ -31,6 +31,7 @@ services:
       - { key: Google__ClientIds__0,          sync: false }
       - { key: Persona__ApiKey,               sync: false }
       - { key: Persona__InquiryTemplateId,    sync: false }
+      - { key: Persona__ThemeSetId,           sync: false }
       - { key: Persona__WebhookSecrets__0,    sync: false }
       - { key: CheckrTrust__ClientId,         sync: false }
       - { key: CheckrTrust__ClientSecret,     sync: false }
@@ -67,6 +68,7 @@ services:
       - { key: Google__ClientIds__0,          sync: false }
       - { key: Persona__ApiKey,               sync: false }
       - { key: Persona__InquiryTemplateId,    sync: false }
+      - { key: Persona__ThemeSetId,           sync: false }
       - { key: Persona__WebhookSecrets__0,    sync: false }
       - { key: CheckrTrust__ClientId,         sync: false }
       - { key: CheckrTrust__ClientSecret,     sync: false }

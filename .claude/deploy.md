@@ -96,6 +96,7 @@ Set in Render UI under each service → Environment.
 | `Google__ClientIds__0` | dev OAuth client id | prod OAuth client id |
 | `Persona__ApiKey` | sandbox key | live key |
 | `Persona__InquiryTemplateId` | sandbox `itmpl_...` | live `itmpl_...` |
+| `Persona__ThemeSetId` | sandbox `theset_...` (optional — leave empty to use the template's dashboard default) | live `theset_...` (optional) |
 | `Persona__WebhookSecrets__0` | dev webhook secret | prod webhook secret |
 | `CheckrTrust__ClientId` | **test-env creds from your Checkr account exec** (deterministic mock results, no billing). Make sure the rep enables the `instant_criminal` product for the test account. | live prod creds |
 | `CheckrTrust__ClientSecret` | test-env creds | prod creds |
