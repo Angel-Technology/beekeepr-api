@@ -7,4 +7,6 @@ public sealed class GoogleIdentity
     public string Email { get; init; } = string.Empty;
 
     public string? DisplayName { get; init; }
+
+    public string? ImageUrl { get; init; }
 }

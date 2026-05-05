@@ -1,3 +1,4 @@
+using BuzzKeepr.Application.Billing.Models;
 using BuzzKeepr.Domain.Enums;
 
 namespace BuzzKeepr.Application.Users.Models;
@@ -10,6 +11,8 @@ public sealed class UserDto
 
     public string? DisplayName { get; init; }
 
+    public string? ImageUrl { get; init; }
+
     public bool EmailVerified { get; init; }
 
     public IdentityVerificationStatus IdentityVerificationStatus { get; init; } = IdentityVerificationStatus.NotStarted;
@@ -17,6 +20,28 @@ public sealed class UserDto
     public string? PersonaInquiryId { get; init; }
 
     public PersonaInquiryStatus? PersonaInquiryStatus { get; init; }
+
+    public string? VerifiedFirstName { get; init; }
+
+    public string? VerifiedMiddleName { get; init; }
+
+    public string? VerifiedLastName { get; init; }
+
+    public string? VerifiedBirthdate { get; init; }
+
+    public string? VerifiedLicenseState { get; init; }
+
+    public string? PhoneNumber { get; init; }
+
+    public DateTime? PersonaVerifiedAtUtc { get; init; }
+
+    public BackgroundCheckBadge BackgroundCheckBadge { get; init; } = BackgroundCheckBadge.None;
+
+    public DateTime? BackgroundCheckBadgeExpiresAtUtc { get; init; }
+
+    public DateTime? TermsAcceptedAtUtc { get; init; }
+
+    public SubscriptionDto Subscription { get; init; } = new();
 
     public DateTime CreatedAtUtc { get; init; }
 }

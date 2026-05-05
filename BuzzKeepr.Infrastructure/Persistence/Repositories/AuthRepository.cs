@@ -14,15 +14,31 @@ public sealed class AuthRepository(BuzzKeeprDbContext dbContext) : IAuthReposito
             .FirstOrDefaultAsync(user => user.Email == email, cancellationToken);
     }
 
-    public async Task<User?> GetUserBySessionTokenHashAsync(string tokenHash, DateTime nowUtc, CancellationToken cancellationToken)
+    public async Task<Session?> GetActiveSessionByTokenHashAsync(string tokenHash, DateTime nowUtc, CancellationToken cancellationToken)
     {
         return await dbContext.Sessions
             .AsNoTracking()
-            .Where(session => session.TokenHash == tokenHash
+            .Include(session => session.User)
+            .FirstOrDefaultAsync(session => session.TokenHash == tokenHash
                 && session.RevokedAtUtc == null
-                && session.ExpiresAtUtc > nowUtc)
-            .Select(session => session.User)
-            .FirstOrDefaultAsync(cancellationToken);
+                && session.ExpiresAtUtc > nowUtc, cancellationToken);
+    }
+
+    public async Task TouchSessionAsync(Guid sessionId, DateTime lastSeenAtUtc, DateTime expiresAtUtc, CancellationToken cancellationToken)
+    {
+        await dbContext.Sessions
+            .Where(session => session.Id == sessionId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(session => session.LastSeenAtUtc, lastSeenAtUtc)
+                .SetProperty(session => session.ExpiresAtUtc, expiresAtUtc), cancellationToken);
+    }
+
+    public async Task<int> DeleteAgedSessionsAsync(DateTime cutoffUtc, CancellationToken cancellationToken)
+    {
+        return await dbContext.Sessions
+            .Where(session => session.ExpiresAtUtc < cutoffUtc
+                || (session.RevokedAtUtc != null && session.RevokedAtUtc < cutoffUtc))
+            .ExecuteDeleteAsync(cancellationToken);
     }
 
     public async Task RevokeSessionAsync(string tokenHash, DateTime revokedAtUtc, CancellationToken cancellationToken)

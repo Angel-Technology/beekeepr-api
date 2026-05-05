@@ -45,7 +45,8 @@ public sealed class GoogleTokenVerifier(IOptions<GoogleAuthOptions> googleAuthOp
         {
             ProviderAccountId = payload.Subject,
             Email = payload.Email,
-            DisplayName = payload.Name
+            DisplayName = payload.Name,
+            ImageUrl = string.IsNullOrWhiteSpace(payload.Picture) ? null : payload.Picture
         };
     }
 }

@@ -1,8 +1,11 @@
+using BuzzKeepr.API.Auth;
 using BuzzKeepr.API.GraphQL.Mutations;
 using BuzzKeepr.API.GraphQL.Queries;
 using BuzzKeepr.Application;
+using BuzzKeepr.Application.Billing;
 using BuzzKeepr.Application.IdentityVerification;
 using BuzzKeepr.Infrastructure;
+using BuzzKeepr.Infrastructure.Billing;
 using BuzzKeepr.Infrastructure.IdentityVerification;
 using BuzzKeepr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -13,6 +16,25 @@ var port = Environment.GetEnvironmentVariable("PORT");
 var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
 var isDevelopment = builder.Environment.IsDevelopment();
 
+// Sentry: stays a no-op when Sentry:Dsn is blank (the dev default), so this can run in any env.
+// Sentry's SDK throws ArgumentNullException on null Dsn but treats empty string as "disabled".
+builder.WebHost.UseSentry(options =>
+{
+    options.Dsn = builder.Configuration["Sentry:Dsn"] ?? string.Empty;
+    // Env tag: explicit Sentry:Environment wins (so the develop Render service can tag events as
+    // "develop" while still running ASPNETCORE_ENVIRONMENT=Production). Falls back to .NET's env
+    // name when nothing is configured. Always lowercased so "Develop"/"develop" don't both show
+    // up as separate environments in Sentry's filter.
+    options.Environment = (builder.Configuration["Sentry:Environment"] ?? builder.Environment.EnvironmentName)
+        .ToLowerInvariant();
+    options.Release = typeof(Program).Assembly.GetName().Version?.ToString();
+    options.Debug = isDevelopment; // print SDK chatter to console in dev so we can see it phoning home
+    options.SendDefaultPii = false;
+    options.MaxRequestBodySize = Sentry.Extensibility.RequestSize.None; // GraphQL bodies contain emails / verification codes
+    options.TracesSampleRate = isDevelopment ? 1.0 : 0.1;
+    options.AttachStacktrace = true;
+});
+
 if (!string.IsNullOrWhiteSpace(port))
     builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 
@@ -20,6 +42,10 @@ if (!string.IsNullOrWhiteSpace(port))
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddSingleton(serviceProvider => new CsrfOriginAllowlist(
+    serviceProvider.GetRequiredService<IHostEnvironment>(),
+    allowedOrigins));
+builder.Services.AddSingleton<AppApiKeyValidator>();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("Frontend", policy =>
@@ -58,6 +84,7 @@ builder.Services
     {
         options.IncludeExceptionDetails = isDevelopment;
     })
+    .AddDiagnosticEventListener<BuzzKeepr.API.GraphQL.SentryGraphQLDiagnosticListener>()
     .AddQueryType<UserQueries>()
     .AddMutationType<UserMutations>();
 
@@ -94,6 +121,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors("Frontend");
+app.UseMiddleware<CsrfProtectionMiddleware>();
 
 app.MapGet("/", () =>
     {
@@ -134,4 +162,28 @@ app.MapPost("/webhooks/persona", async (
     return Results.NoContent();
 });
 
+app.MapPost("/webhooks/revenuecat", async (
+    HttpContext httpContext,
+    RevenueCatWebhookAuthorizer authorizer,
+    IBillingService billingService,
+    CancellationToken cancellationToken) =>
+{
+    httpContext.Request.EnableBuffering();
+
+    using var reader = new StreamReader(httpContext.Request.Body, leaveOpen: true);
+    var rawRequestBody = await reader.ReadToEndAsync(cancellationToken);
+    httpContext.Request.Body.Position = 0;
+
+    var authorizationHeader = httpContext.Request.Headers.Authorization.ToString();
+
+    if (!authorizer.IsValid(authorizationHeader))
+        return Results.Unauthorized();
+
+    await billingService.ProcessRevenueCatWebhookAsync(rawRequestBody, cancellationToken);
+
+    return Results.NoContent();
+});
+
 app.Run();
+
+public partial class Program;

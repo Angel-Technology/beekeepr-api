@@ -1,0 +1,82 @@
+# Infrastructure-as-Code for Render. When you connect this repo as a Blueprint,
+# Render reads this file and provisions both services. Subsequent edits sync on push.
+#
+# Secrets (anything marked `sync: false`) are NOT pulled from this file —
+# you set them once in the Render UI per service. See `.claude/deploy.md` for the full list.
+
+services:
+  - type: web
+    name: buzzkeepr-api-develop
+    runtime: docker
+    plan: starter            # bump up when traffic warrants
+    branch: develop
+    autoDeploy: true
+    healthCheckPath: /health
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production    # run the API as Production-mode (no dev shortcuts);
+                             # we differentiate "develop env" from "prod env" via the
+                             # Sentry tag + per-service secrets, not via dev mode.
+      - key: PORT
+        value: 10000         # matches the EXPOSE in Dockerfile
+      - key: Database__ApplyMigrationsOnStartup
+        value: "true"
+      # Secrets — set in Render UI:
+      - { key: Database__ConnectionString,    sync: false }
+      - { key: Email__ResendApiKey,           sync: false }
+      - { key: Email__SignInTemplateId,       sync: false }
+      - { key: Email__WelcomeTemplateId,      sync: false }
+      - { key: Email__FrontendBaseUrl,        sync: false }
+      - { key: Google__ClientIds__0,          sync: false }
+      - { key: Persona__ApiKey,               sync: false }
+      - { key: Persona__InquiryTemplateId,    sync: false }
+      - { key: Persona__ThemeSetId,           sync: false }
+      - { key: Persona__WebhookSecrets__0,    sync: false }
+      - { key: CheckrTrust__ClientId,         sync: false }
+      - { key: CheckrTrust__ClientSecret,     sync: false }
+      - { key: CheckrTrust__RulesetIds__0,    sync: false }
+      - { key: CheckrTrust__RulesetIds__1,    sync: false }
+      - { key: Auth__AppApiKey,               sync: false }
+      - { key: RevenueCat__SecretApiKey,            sync: false }
+      - { key: RevenueCat__WebhookAuthorizationToken, sync: false }
+      - { key: Sentry__Dsn,                   sync: false }
+      - { key: Sentry__Environment,           sync: false }
+      - { key: Cors__AllowedOrigins__0,       sync: false }
+
+  - type: web
+    name: buzzkeepr-api-prod
+    runtime: docker
+    plan: starter            # bump up when traffic warrants
+    branch: main
+    autoDeploy: true
+    healthCheckPath: /health
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: PORT
+        value: 10000
+      - key: Database__ApplyMigrationsOnStartup
+        value: "true"
+      # Secrets — set in Render UI (different values from develop service):
+      - { key: Database__ConnectionString,    sync: false }
+      - { key: Email__ResendApiKey,           sync: false }
+      - { key: Email__SignInTemplateId,       sync: false }
+      - { key: Email__WelcomeTemplateId,      sync: false }
+      - { key: Email__FrontendBaseUrl,        sync: false }
+      - { key: Google__ClientIds__0,          sync: false }
+      - { key: Persona__ApiKey,               sync: false }
+      - { key: Persona__InquiryTemplateId,    sync: false }
+      - { key: Persona__ThemeSetId,           sync: false }
+      - { key: Persona__WebhookSecrets__0,    sync: false }
+      - { key: CheckrTrust__ClientId,         sync: false }
+      - { key: CheckrTrust__ClientSecret,     sync: false }
+      - { key: CheckrTrust__RulesetIds__0,    sync: false }
+      - { key: CheckrTrust__RulesetIds__1,    sync: false }
+      - { key: Auth__AppApiKey,               sync: false }
+      - { key: RevenueCat__SecretApiKey,            sync: false }
+      - { key: RevenueCat__WebhookAuthorizationToken, sync: false }
+      - { key: Sentry__Dsn,                   sync: false }
+      - { key: Sentry__Environment,           sync: false }
+      - { key: Cors__AllowedOrigins__0,       sync: false }

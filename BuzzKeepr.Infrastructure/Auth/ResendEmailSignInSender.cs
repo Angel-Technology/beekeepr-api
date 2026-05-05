@@ -15,20 +15,28 @@ public sealed class ResendEmailSignInSender(
     {
         var options = emailOptions.Value;
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"{options.ResendBaseUrl.TrimEnd('/')}/emails");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.ResendApiKey);
+        if (string.IsNullOrWhiteSpace(options.SignInTemplateId))
+            throw new InvalidOperationException("Email:SignInTemplateId is not configured.");
+
+        var expiresInMinutes = Math.Max(1, (int)Math.Round((expiresAtUtc - DateTime.UtcNow).TotalMinutes));
 
         var payload = new
         {
-            from = options.FromEmail,
             to = new[] { email },
-            subject = "Your BuzzKeepr sign-in code",
-            html =
-                $"<p>Your BuzzKeepr sign-in code is:</p><h1>{code}</h1><p>This code expires at {expiresAtUtc:u}.</p>",
-            text =
-                $"Your BuzzKeepr sign-in code is {code}. This code expires at {expiresAtUtc:u}."
+            template = new
+            {
+                id = options.SignInTemplateId,
+                variables = new
+                {
+                    code,
+                    expires_in_minutes = expiresInMinutes,
+                    email
+                }
+            }
         };
 
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{options.ResendBaseUrl.TrimEnd('/')}/emails");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.ResendApiKey);
         request.Content = new StringContent(
             JsonSerializer.Serialize(payload),
             Encoding.UTF8,
@@ -40,6 +48,6 @@ public sealed class ResendEmailSignInSender(
 
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         throw new InvalidOperationException(
-            $"Resend email request failed with status {(int)response.StatusCode}: {body}");
+            $"Resend sign-in email failed with status {(int)response.StatusCode}: {body}");
     }
 }

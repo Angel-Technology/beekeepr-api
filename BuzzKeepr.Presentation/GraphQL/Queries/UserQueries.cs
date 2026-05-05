@@ -8,24 +8,23 @@ namespace BuzzKeepr.API.GraphQL.Queries;
 public sealed class UserQueries
 {
     public async Task<UserGraph?> GetUserByIdAsync(Guid id,
+        [Service] IAuthService authService,
         [Service] IUserService userService,
+        [Service] IHttpContextAccessor httpContextAccessor,
         CancellationToken cancellationToken)
     {
-        var user = await userService.GetByIdAsync(id, cancellationToken);
+        var httpContext = httpContextAccessor.HttpContext
+            ?? throw new InvalidOperationException("HTTP context is required for getUserById.");
 
-        return user is null
-            ? null
-            : new UserGraph
-            {
-                Id = user.Id,
-                Email = user.Email,
-                DisplayName = user.DisplayName,
-                EmailVerified = user.EmailVerified,
-                IdentityVerificationStatus = user.IdentityVerificationStatus,
-                PersonaInquiryId = user.PersonaInquiryId,
-                PersonaInquiryStatus = user.PersonaInquiryStatus,
-                CreatedAtUtc = user.CreatedAtUtc
-            };
+        // Row-level security: callers can only fetch their own row through this query.
+        // Public profile lookups will land on a separate `userProfile`/`searchUsers` resolver
+        // backed by a stripped-down UserProfileGraph (no PII).
+        var current = await SessionRefresher.ResolveAsync(httpContext, authService, cancellationToken);
+        if (current.User is null || current.User.Id != id)
+            return null;
+
+        var user = await userService.GetByIdAsync(id, cancellationToken);
+        return user is null ? null : UserGraph.From(user);
     }
 
     public async Task<UserGraph?> GetCurrentUserAsync(
@@ -36,22 +35,7 @@ public sealed class UserQueries
         var httpContext = httpContextAccessor.HttpContext
             ?? throw new InvalidOperationException("HTTP context is required for session lookup.");
 
-        var result = await authService.GetCurrentUserAsync(
-            SessionTokenResolver.Resolve(httpContext),
-            cancellationToken);
-
-        return result.User is null
-            ? null
-            : new UserGraph
-            {
-                Id = result.User.Id,
-                Email = result.User.Email,
-                DisplayName = result.User.DisplayName,
-                EmailVerified = result.User.EmailVerified,
-                IdentityVerificationStatus = result.User.IdentityVerificationStatus,
-                PersonaInquiryId = result.User.PersonaInquiryId,
-                PersonaInquiryStatus = result.User.PersonaInquiryStatus,
-                CreatedAtUtc = result.User.CreatedAtUtc
-            };
+        var result = await SessionRefresher.ResolveAsync(httpContext, authService, cancellationToken);
+        return result.User is null ? null : UserGraph.From(result.User);
     }
 }

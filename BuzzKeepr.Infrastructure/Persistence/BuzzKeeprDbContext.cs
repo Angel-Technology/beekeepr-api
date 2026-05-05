@@ -25,6 +25,9 @@ public sealed class BuzzKeeprDbContext(DbContextOptions<BuzzKeeprDbContext> opti
             builder.Property(user => user.DisplayName)
                 .HasMaxLength(200);
 
+            builder.Property(user => user.ImageUrl)
+                .HasMaxLength(2048);
+
             builder.Property(user => user.IdentityVerificationStatus)
                 .HasConversion<string>()
                 .HasMaxLength(50)
@@ -38,7 +41,13 @@ public sealed class BuzzKeeprDbContext(DbContextOptions<BuzzKeeprDbContext> opti
                 .HasConversion<string>()
                 .HasMaxLength(50);
 
+            builder.Property(user => user.PersonaInquiryUpdatedAtUtc)
+                .HasColumnType("timestamp with time zone");
+
             builder.Property(user => user.VerifiedFirstName)
+                .HasMaxLength(200);
+
+            builder.Property(user => user.VerifiedMiddleName)
                 .HasMaxLength(200);
 
             builder.Property(user => user.VerifiedLastName)
@@ -47,34 +56,71 @@ public sealed class BuzzKeeprDbContext(DbContextOptions<BuzzKeeprDbContext> opti
             builder.Property(user => user.VerifiedBirthdate)
                 .HasMaxLength(20);
 
-            builder.Property(user => user.VerifiedAddressStreet1)
-                .HasMaxLength(200);
-
-            builder.Property(user => user.VerifiedAddressStreet2)
-                .HasMaxLength(200);
-
-            builder.Property(user => user.VerifiedAddressCity)
-                .HasMaxLength(100);
-
-            builder.Property(user => user.VerifiedAddressSubdivision)
-                .HasMaxLength(100);
-
-            builder.Property(user => user.VerifiedAddressPostalCode)
-                .HasMaxLength(20);
-
-            builder.Property(user => user.VerifiedCountryCode)
+            builder.Property(user => user.VerifiedLicenseState)
                 .HasMaxLength(10);
 
-            builder.Property(user => user.VerifiedLicenseLast4)
-                .HasMaxLength(4);
+            builder.Property(user => user.PhoneNumber)
+                .HasMaxLength(32);
 
-            builder.Property(user => user.VerifiedLicenseExpirationDate)
-                .HasMaxLength(20);
+            builder.Property(user => user.CheckrProfileId)
+                .HasMaxLength(64);
+
+            builder.Property(user => user.CheckrLastCheckId)
+                .HasMaxLength(64);
+
+            builder.Property(user => user.CheckrLastCheckAtUtc)
+                .HasColumnType("timestamp with time zone");
+
+            builder.Property(user => user.BackgroundCheckBadge)
+                .HasConversion<string>()
+                .HasMaxLength(50)
+                .HasDefaultValue(BackgroundCheckBadge.None)
+                .IsRequired();
+
+            builder.Property(user => user.BackgroundCheckBadgeExpiresAtUtc)
+                .HasColumnType("timestamp with time zone");
+
+            builder.Property(user => user.TermsAcceptedAtUtc)
+                .HasColumnType("timestamp with time zone");
+
+            builder.Property(user => user.WelcomeEmailSentAtUtc)
+                .HasColumnType("timestamp with time zone");
+
+            builder.Property(user => user.SubscriptionStatus)
+                .HasConversion<string>()
+                .HasMaxLength(50)
+                .HasDefaultValue(SubscriptionStatus.None)
+                .IsRequired();
+
+            builder.Property(user => user.SubscriptionEntitlement)
+                .HasMaxLength(100);
+
+            builder.Property(user => user.SubscriptionProductId)
+                .HasMaxLength(200);
+
+            builder.Property(user => user.SubscriptionStore)
+                .HasConversion<string>()
+                .HasMaxLength(50);
+
+            builder.Property(user => user.SubscriptionCurrentPeriodEndUtc)
+                .HasColumnType("timestamp with time zone");
+
+            builder.Property(user => user.SubscriptionUpdatedAtUtc)
+                .HasColumnType("timestamp with time zone");
+
+            builder.Property(user => user.RevenueCatAppUserId)
+                .HasMaxLength(200);
 
             builder.HasIndex(user => user.Email)
                 .IsUnique();
 
             builder.HasIndex(user => user.PersonaInquiryId)
+                .IsUnique();
+
+            builder.HasIndex(user => user.CheckrProfileId)
+                .IsUnique();
+
+            builder.HasIndex(user => user.RevenueCatAppUserId)
                 .IsUnique();
         });
 

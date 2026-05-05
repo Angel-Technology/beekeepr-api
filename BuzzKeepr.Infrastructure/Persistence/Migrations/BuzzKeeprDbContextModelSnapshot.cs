@@ -111,6 +111,30 @@ namespace BuzzKeepr.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("BackgroundCheckBadge")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasDefaultValue("None");
+
+                    b.Property<DateTime?>("BackgroundCheckBadgeExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("CheckrLastCheckAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool?>("CheckrLastCheckHasPossibleMatches")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("CheckrLastCheckId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("CheckrProfileId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -133,6 +157,10 @@ namespace BuzzKeepr.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(50)")
                         .HasDefaultValue("NotStarted");
 
+                    b.Property<string>("ImageUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
                     b.Property<string>("PersonaInquiryId")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
@@ -141,36 +169,54 @@ namespace BuzzKeepr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
 
+                    b.Property<DateTime?>("PersonaInquiryUpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime?>("PersonaVerifiedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<string>("VerifiedAddressCity")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
+                    b.Property<string>("PhoneNumber")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
 
-                    b.Property<string>("VerifiedAddressPostalCode")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<string>("VerifiedAddressStreet1")
+                    b.Property<string>("RevenueCatAppUserId")
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
-                    b.Property<string>("VerifiedAddressStreet2")
+                    b.Property<DateTime?>("SubscriptionCurrentPeriodEndUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SubscriptionEntitlement")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("SubscriptionProductId")
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
-                    b.Property<string>("VerifiedAddressSubdivision")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
+                    b.Property<string>("SubscriptionStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasDefaultValue("None");
+
+                    b.Property<string>("SubscriptionStore")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime?>("SubscriptionUpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool?>("SubscriptionWillRenew")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("TermsAcceptedAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("VerifiedBirthdate")
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
-
-                    b.Property<string>("VerifiedCountryCode")
-                        .HasMaxLength(10)
-                        .HasColumnType("character varying(10)");
 
                     b.Property<string>("VerifiedFirstName")
                         .HasMaxLength(200)
@@ -180,20 +226,29 @@ namespace BuzzKeepr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
-                    b.Property<string>("VerifiedLicenseExpirationDate")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
+                    b.Property<string>("VerifiedLicenseState")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
 
-                    b.Property<string>("VerifiedLicenseLast4")
-                        .HasMaxLength(4)
-                        .HasColumnType("character varying(4)");
+                    b.Property<string>("VerifiedMiddleName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("WelcomeEmailSentAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CheckrProfileId")
+                        .IsUnique();
 
                     b.HasIndex("Email")
                         .IsUnique();
 
                     b.HasIndex("PersonaInquiryId")
+                        .IsUnique();
+
+                    b.HasIndex("RevenueCatAppUserId")
                         .IsUnique();
 
                     b.ToTable("Users");

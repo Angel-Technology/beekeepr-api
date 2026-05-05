@@ -7,4 +7,6 @@ public interface IUserService
     Task<UserDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken);
 
     Task<CreateUserResult> CreateAsync(CreateUserInput input, CancellationToken cancellationToken);
+
+    Task<AcceptTermsResult> AcceptTermsAsync(Guid userId, CancellationToken cancellationToken);
 }

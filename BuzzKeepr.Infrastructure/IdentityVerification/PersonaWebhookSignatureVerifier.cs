@@ -60,8 +60,10 @@ public sealed class PersonaWebhookSignatureVerifier(IOptions<PersonaOptions> per
 
     private static string ComputeSignature(string secret, string rawRequestBody, string timestamp)
     {
+        // Persona signs `${timestamp}.${rawBody}` per their webhook docs — inverting the order
+        // produces a valid-looking but always-wrong signature.
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
-        var payload = Encoding.UTF8.GetBytes($"{rawRequestBody}.{timestamp}");
+        var payload = Encoding.UTF8.GetBytes($"{timestamp}.{rawRequestBody}");
         var hash = hmac.ComputeHash(payload);
         return Convert.ToHexString(hash).ToLowerInvariant();
     }

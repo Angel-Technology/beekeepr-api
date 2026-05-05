@@ -1,33 +1,55 @@
 using System.Security.Cryptography;
 using System.Text;
 using BuzzKeepr.Application.Auth.Models;
+using BuzzKeepr.Application.Billing.Models;
 using BuzzKeepr.Application.IdentityVerification;
+using BuzzKeepr.Application.Users;
 using BuzzKeepr.Application.Users.Models;
 using BuzzKeepr.Domain.Entities;
 using BuzzKeepr.Domain.Enums;
+using Microsoft.Extensions.Logging;
 
 namespace BuzzKeepr.Application.Auth;
 
 public sealed class AuthService(
     IAuthRepository authRepository,
     IEmailSignInSender emailSignInSender,
-    IGoogleTokenVerifier googleTokenVerifier) : IAuthService
+    IGoogleTokenVerifier googleTokenVerifier,
+    IWelcomeEmailSender welcomeEmailSender,
+    ILogger<AuthService> logger) : IAuthService
 {
     private const int MaxVerificationAttempts = 5;
+    private static readonly TimeSpan SessionLifetime = TimeSpan.FromDays(30);
+    private static readonly TimeSpan SessionTouchInterval = TimeSpan.FromHours(24);
 
     public async Task<CurrentUserResult> GetCurrentUserAsync(string? sessionToken, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(sessionToken))
             return new CurrentUserResult();
 
-        var user = await authRepository.GetUserBySessionTokenHashAsync(
+        var nowUtc = DateTime.UtcNow;
+        var session = await authRepository.GetActiveSessionByTokenHashAsync(
             HashToken(sessionToken),
-            DateTime.UtcNow,
+            nowUtc,
             cancellationToken);
+
+        if (session?.User is null)
+            return new CurrentUserResult();
+
+        DateTime? refreshedExpiresAtUtc = null;
+
+        var lastSeenAtUtc = session.LastSeenAtUtc ?? session.CreatedAtUtc;
+        if (nowUtc - lastSeenAtUtc >= SessionTouchInterval)
+        {
+            var newExpiresAtUtc = nowUtc.Add(SessionLifetime);
+            await authRepository.TouchSessionAsync(session.Id, nowUtc, newExpiresAtUtc, cancellationToken);
+            refreshedExpiresAtUtc = newExpiresAtUtc;
+        }
 
         return new CurrentUserResult
         {
-            User = user is null ? null : MapUser(user)
+            User = MapUser(session.User),
+            RefreshedSessionExpiresAtUtc = refreshedExpiresAtUtc
         };
     }
 
@@ -90,8 +112,16 @@ public sealed class AuthService(
                 verificationToken.ExpiresAtUtc,
                 cancellationToken);
         }
-        catch
+        catch (Exception exception)
         {
+            // Log the full exception so the actual Resend response body (carried in the
+            // InvalidOperationException's message — e.g. unverified-from, invalid template id,
+            // recipient not allowed on free tier) is visible in console + Sentry. Without this
+            // the caller only sees a generic "Email delivery failed" and has to guess.
+            logger.LogWarning(
+                exception,
+                "Failed to send sign-in code to {Email} via Resend.",
+                normalizedEmail);
             return new RequestEmailSignInResult
             {
                 EmailDeliveryFailed = true
@@ -149,6 +179,7 @@ public sealed class AuthService(
         }
 
         var user = await authRepository.GetUserByEmailAsync(normalizedEmail, cancellationToken);
+        var isNewUser = user is null;
 
         if (user is null)
         {
@@ -176,12 +207,20 @@ public sealed class AuthService(
             UserId = user.Id,
             TokenHash = HashToken(rawSessionToken),
             CreatedAtUtc = nowUtc,
-            ExpiresAtUtc = nowUtc.AddDays(30),
-            LastSeenAtUtc = nowUtc
+            ExpiresAtUtc = nowUtc.Add(SessionLifetime),
+            LastSeenAtUtc = nowUtc,
+            IpAddress = TrimToMax(input.IpAddress, 64),
+            UserAgent = TrimToMax(input.UserAgent, 512)
         };
 
         await authRepository.AddSessionAsync(session, cancellationToken);
         await authRepository.SaveChangesAsync(cancellationToken);
+
+        // Email sign-in users have no display name yet — sending a welcome here would render
+        // "Welcome to BuzzKeepr, there." Defer until we have a name (Persona webhook will
+        // trigger the welcome with verifiedFirstName when verification approves).
+        if (isNewUser && !string.IsNullOrWhiteSpace(user.DisplayName))
+            await TrySendWelcomeAsync(user, cancellationToken);
 
         return new VerifyEmailSignInResult
         {
@@ -218,6 +257,7 @@ public sealed class AuthService(
             cancellationToken);
 
         User user;
+        var isNewUser = false;
 
         if (externalAccount is not null)
         {
@@ -228,19 +268,21 @@ public sealed class AuthService(
         else
         {
             var existingUser = await authRepository.GetUserByEmailAsync(normalizedEmail, cancellationToken);
-            var isNewUser = existingUser is null;
+            isNewUser = existingUser is null;
 
             user = existingUser ?? new User
             {
                 Id = Guid.NewGuid(),
                 Email = normalizedEmail,
                 DisplayName = string.IsNullOrWhiteSpace(identity.DisplayName) ? null : identity.DisplayName.Trim(),
+                ImageUrl = identity.ImageUrl,
                 EmailVerified = true,
                 CreatedAtUtc = nowUtc
             };
 
             user.EmailVerified = true;
             user.DisplayName ??= string.IsNullOrWhiteSpace(identity.DisplayName) ? null : identity.DisplayName.Trim();
+            user.ImageUrl ??= identity.ImageUrl;
 
             if (isNewUser) await authRepository.AddUserAsync(user, cancellationToken);
 
@@ -266,12 +308,17 @@ public sealed class AuthService(
             UserId = user.Id,
             TokenHash = HashToken(rawSessionToken),
             CreatedAtUtc = nowUtc,
-            ExpiresAtUtc = nowUtc.AddDays(30),
-            LastSeenAtUtc = nowUtc
+            ExpiresAtUtc = nowUtc.Add(SessionLifetime),
+            LastSeenAtUtc = nowUtc,
+            IpAddress = TrimToMax(input.IpAddress, 64),
+            UserAgent = TrimToMax(input.UserAgent, 512)
         };
 
         await authRepository.AddSessionAsync(session, cancellationToken);
         await authRepository.SaveChangesAsync(cancellationToken);
+
+        if (isNewUser)
+            await TrySendWelcomeAsync(user, cancellationToken);
 
         return new SignInWithGoogleResult
         {
@@ -298,6 +345,32 @@ public sealed class AuthService(
         return value.ToString("D5");
     }
 
+    private async Task TrySendWelcomeAsync(User user, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await welcomeEmailSender.SendWelcomeAsync(user.Email, user.DisplayName, cancellationToken);
+            user.WelcomeEmailSentAtUtc = DateTime.UtcNow;
+            await authRepository.SaveChangesAsync(cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(
+                exception,
+                "Welcome email failed to send for user {UserId}; sweeper will retry.",
+                user.Id);
+        }
+    }
+
+    private static string? TrimToMax(string? value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var trimmed = value.Trim();
+        return trimmed.Length <= maxLength ? trimmed : trimmed[..maxLength];
+    }
+
     private static string HashToken(string rawToken)
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(rawToken));
@@ -311,10 +384,22 @@ public sealed class AuthService(
             Id = user.Id,
             Email = user.Email,
             DisplayName = user.DisplayName,
+            ImageUrl = user.ImageUrl,
             EmailVerified = user.EmailVerified,
             IdentityVerificationStatus = user.IdentityVerificationStatus,
             PersonaInquiryId = user.PersonaInquiryId,
             PersonaInquiryStatus = user.PersonaInquiryStatus,
+            VerifiedFirstName = user.VerifiedFirstName,
+            VerifiedMiddleName = user.VerifiedMiddleName,
+            VerifiedLastName = user.VerifiedLastName,
+            VerifiedBirthdate = user.VerifiedBirthdate,
+            VerifiedLicenseState = user.VerifiedLicenseState,
+            PhoneNumber = user.PhoneNumber,
+            PersonaVerifiedAtUtc = user.PersonaVerifiedAtUtc,
+            BackgroundCheckBadge = user.BackgroundCheckBadge,
+            BackgroundCheckBadgeExpiresAtUtc = user.BackgroundCheckBadgeExpiresAtUtc,
+            TermsAcceptedAtUtc = user.TermsAcceptedAtUtc,
+            Subscription = SubscriptionDto.FromUser(user),
             CreatedAtUtc = user.CreatedAtUtc
         };
     }

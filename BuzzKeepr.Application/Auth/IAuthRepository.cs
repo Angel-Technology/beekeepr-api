@@ -7,7 +7,11 @@ public interface IAuthRepository
 {
     Task<User?> GetUserByEmailAsync(string email, CancellationToken cancellationToken);
 
-    Task<User?> GetUserBySessionTokenHashAsync(string tokenHash, DateTime nowUtc, CancellationToken cancellationToken);
+    Task<Session?> GetActiveSessionByTokenHashAsync(string tokenHash, DateTime nowUtc, CancellationToken cancellationToken);
+
+    Task TouchSessionAsync(Guid sessionId, DateTime lastSeenAtUtc, DateTime expiresAtUtc, CancellationToken cancellationToken);
+
+    Task<int> DeleteAgedSessionsAsync(DateTime cutoffUtc, CancellationToken cancellationToken);
 
     Task RevokeSessionAsync(string tokenHash, DateTime revokedAtUtc, CancellationToken cancellationToken);
 

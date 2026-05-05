@@ -1,10 +1,15 @@
+using BuzzKeepr.Application.Billing.Models;
 using BuzzKeepr.Application.IdentityVerification;
 using BuzzKeepr.Application.Users.Models;
 using BuzzKeepr.Domain.Entities;
+using Microsoft.Extensions.Logging;
 
 namespace BuzzKeepr.Application.Users;
 
-public sealed class UserService(IUserRepository userRepository) : IUserService
+public sealed class UserService(
+    IUserRepository userRepository,
+    IWelcomeEmailSender welcomeEmailSender,
+    ILogger<UserService> logger) : IUserService
 {
     public async Task<UserDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
     {
@@ -46,7 +51,46 @@ public sealed class UserService(IUserRepository userRepository) : IUserService
 
         await userRepository.AddAsync(user, cancellationToken);
 
+        try
+        {
+            await welcomeEmailSender.SendWelcomeAsync(user.Email, user.DisplayName, cancellationToken);
+            user.WelcomeEmailSentAtUtc = DateTime.UtcNow;
+            await userRepository.SaveChangesAsync(cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(
+                exception,
+                "Welcome email failed to send for user {UserId}; sweeper will retry.",
+                user.Id);
+        }
+
         return new CreateUserResult
+        {
+            Success = true,
+            User = MapUser(user)
+        };
+    }
+
+    public async Task<AcceptTermsResult> AcceptTermsAsync(
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var user = await userRepository.GetByIdForUpdateAsync(userId, cancellationToken);
+
+        if (user is null)
+        {
+            return new AcceptTermsResult
+            {
+                UserNotFound = true
+            };
+        }
+
+        user.TermsAcceptedAtUtc = DateTime.UtcNow;
+
+        await userRepository.SaveChangesAsync(cancellationToken);
+
+        return new AcceptTermsResult
         {
             Success = true,
             User = MapUser(user)
@@ -60,10 +104,22 @@ public sealed class UserService(IUserRepository userRepository) : IUserService
             Id = user.Id,
             Email = user.Email,
             DisplayName = user.DisplayName,
+            ImageUrl = user.ImageUrl,
             EmailVerified = user.EmailVerified,
             IdentityVerificationStatus = user.IdentityVerificationStatus,
             PersonaInquiryId = user.PersonaInquiryId,
             PersonaInquiryStatus = user.PersonaInquiryStatus,
+            VerifiedFirstName = user.VerifiedFirstName,
+            VerifiedMiddleName = user.VerifiedMiddleName,
+            VerifiedLastName = user.VerifiedLastName,
+            VerifiedBirthdate = user.VerifiedBirthdate,
+            VerifiedLicenseState = user.VerifiedLicenseState,
+            PhoneNumber = user.PhoneNumber,
+            PersonaVerifiedAtUtc = user.PersonaVerifiedAtUtc,
+            BackgroundCheckBadge = user.BackgroundCheckBadge,
+            BackgroundCheckBadgeExpiresAtUtc = user.BackgroundCheckBadgeExpiresAtUtc,
+            TermsAcceptedAtUtc = user.TermsAcceptedAtUtc,
+            Subscription = SubscriptionDto.FromUser(user),
             CreatedAtUtc = user.CreatedAtUtc
         };
     }
