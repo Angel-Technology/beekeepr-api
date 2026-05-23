@@ -7,6 +7,7 @@ using BuzzKeepr.API.GraphQL.Inputs;
 using ApplicationRequestEmailSignInInput = BuzzKeepr.Application.Auth.Models.RequestEmailSignInInput;
 using ApplicationSignInWithGoogleInput = BuzzKeepr.Application.Auth.Models.SignInWithGoogleInput;
 using ApplicationCreateUserInput = BuzzKeepr.Application.Users.Models.CreateUserInput;
+using ApplicationUpdateProfileInput = BuzzKeepr.Application.Users.Models.UpdateProfileInput;
 using ApplicationVerifyEmailSignInInput = BuzzKeepr.Application.Auth.Models.VerifyEmailSignInInput;
 
 namespace BuzzKeepr.API.GraphQL.Mutations;
@@ -266,6 +267,73 @@ public sealed class UserMutations
         }
 
         return new AcceptTermsPayload
+        {
+            User = UserGraph.From(result.User)
+        };
+    }
+
+    public async Task<UpdateProfilePayload> UpdateProfileAsync(
+        UpdateProfileInput input,
+        [Service] IAuthService authService,
+        [Service] IUserService userService,
+        [Service] IHttpContextAccessor httpContextAccessor,
+        CancellationToken cancellationToken)
+    {
+        var httpContext = httpContextAccessor.HttpContext
+            ?? throw new InvalidOperationException("HTTP context is required for profile updates.");
+
+        var currentUser = await SessionRefresher.ResolveAsync(httpContext, authService, cancellationToken);
+
+        if (currentUser.User is null)
+        {
+            return new UpdateProfilePayload
+            {
+                Error = "Authentication is required."
+            };
+        }
+
+        var result = await userService.UpdateProfileAsync(
+            currentUser.User.Id,
+            new ApplicationUpdateProfileInput
+            {
+                Nickname = input.Nickname,
+                Handle = input.Handle
+            },
+            cancellationToken);
+
+        if (result.NicknameTooLong)
+        {
+            return new UpdateProfilePayload
+            {
+                Error = "Nickname must be 50 characters or fewer."
+            };
+        }
+
+        if (result.HandleInvalid)
+        {
+            return new UpdateProfilePayload
+            {
+                Error = "Handle must start with @ followed by 3-20 letters, numbers, or underscores."
+            };
+        }
+
+        if (result.HandleAlreadyTaken)
+        {
+            return new UpdateProfilePayload
+            {
+                Error = "That handle is already taken."
+            };
+        }
+
+        if (result.UserNotFound || !result.Success || result.User is null)
+        {
+            return new UpdateProfilePayload
+            {
+                Error = "Unable to update profile."
+            };
+        }
+
+        return new UpdateProfilePayload
         {
             User = UserGraph.From(result.User)
         };

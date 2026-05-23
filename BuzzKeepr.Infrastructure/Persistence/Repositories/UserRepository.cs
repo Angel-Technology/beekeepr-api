@@ -26,6 +26,13 @@ public sealed class UserRepository(BuzzKeeprDbContext dbContext) : IUserReposito
             .AnyAsync(user => user.Email == email, cancellationToken);
     }
 
+    public async Task<bool> HandleExistsAsync(string handle, Guid? excludeUserId, CancellationToken cancellationToken)
+    {
+        return await dbContext.Users
+            .AsNoTracking()
+            .AnyAsync(user => user.Handle == handle && (excludeUserId == null || user.Id != excludeUserId), cancellationToken);
+    }
+
     public async Task AddAsync(User user, CancellationToken cancellationToken)
     {
         dbContext.Users.Add(user);

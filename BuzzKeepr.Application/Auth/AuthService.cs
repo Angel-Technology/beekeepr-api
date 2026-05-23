@@ -8,6 +8,7 @@ using BuzzKeepr.Application.Users.Models;
 using BuzzKeepr.Domain.Entities;
 using BuzzKeepr.Domain.Enums;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace BuzzKeepr.Application.Auth;
 
@@ -16,8 +17,12 @@ public sealed class AuthService(
     IEmailSignInSender emailSignInSender,
     IGoogleTokenVerifier googleTokenVerifier,
     IWelcomeEmailSender welcomeEmailSender,
+    IOptions<AuthOptions> authOptions,
     ILogger<AuthService> logger) : IAuthService
 {
+    private readonly IReadOnlyDictionary<string, string> reviewAccountPins =
+        BuildReviewAccountPins(authOptions.Value.ReviewAccounts);
+
     private const int MaxVerificationAttempts = 5;
     private static readonly TimeSpan SessionLifetime = TimeSpan.FromDays(30);
     private static readonly TimeSpan SessionTouchInterval = TimeSpan.FromHours(24);
@@ -82,12 +87,18 @@ public sealed class AuthService(
             };
 
         var existingUser = await authRepository.GetUserByEmailAsync(normalizedEmail, cancellationToken);
-        var rawCode = CreateFiveDigitCode();
         var nowUtc = DateTime.UtcNow;
         var existingVerificationToken = await authRepository.GetLatestUnconsumedVerificationTokenAsync(
             normalizedEmail,
             VerificationTokenPurpose.EmailSignIn,
             cancellationToken);
+
+        // App-store reviewers (Apple/Google) can't receive our real Resend emails because they
+        // sign in from a corporate proxy that doesn't proxy mail. For accounts in
+        // Auth:ReviewAccounts we persist a token whose hash matches the configured PIN and
+        // skip the email send. Verify-side flow is unchanged — same expiry, same attempt cap.
+        var isReviewAccount = reviewAccountPins.TryGetValue(normalizedEmail, out var reviewPin);
+        var rawCode = isReviewAccount ? reviewPin! : CreateFiveDigitCode();
 
         var verificationToken = existingVerificationToken ?? new VerificationToken
         {
@@ -104,28 +115,31 @@ public sealed class AuthService(
         verificationToken.ConsumedAtUtc = null;
         verificationToken.UserId ??= existingUser?.Id;
 
-        try
+        if (!isReviewAccount)
         {
-            await emailSignInSender.SendSignInCodeAsync(
-                normalizedEmail,
-                rawCode,
-                verificationToken.ExpiresAtUtc,
-                cancellationToken);
-        }
-        catch (Exception exception)
-        {
-            // Log the full exception so the actual Resend response body (carried in the
-            // InvalidOperationException's message — e.g. unverified-from, invalid template id,
-            // recipient not allowed on free tier) is visible in console + Sentry. Without this
-            // the caller only sees a generic "Email delivery failed" and has to guess.
-            logger.LogWarning(
-                exception,
-                "Failed to send sign-in code to {Email} via Resend.",
-                normalizedEmail);
-            return new RequestEmailSignInResult
+            try
             {
-                EmailDeliveryFailed = true
-            };
+                await emailSignInSender.SendSignInCodeAsync(
+                    normalizedEmail,
+                    rawCode,
+                    verificationToken.ExpiresAtUtc,
+                    cancellationToken);
+            }
+            catch (Exception exception)
+            {
+                // Log the full exception so the actual Resend response body (carried in the
+                // InvalidOperationException's message — e.g. unverified-from, invalid template id,
+                // recipient not allowed on free tier) is visible in console + Sentry. Without this
+                // the caller only sees a generic "Email delivery failed" and has to guess.
+                logger.LogWarning(
+                    exception,
+                    "Failed to send sign-in code to {Email} via Resend.",
+                    normalizedEmail);
+                return new RequestEmailSignInResult
+                {
+                    EmailDeliveryFailed = true
+                };
+            }
         }
 
         if (existingVerificationToken is null)
@@ -332,6 +346,25 @@ public sealed class AuthService(
     private static string NormalizeEmail(string email)
     {
         return email.Trim().ToLowerInvariant();
+    }
+
+    private static IReadOnlyDictionary<string, string> BuildReviewAccountPins(
+        IReadOnlyDictionary<string, string>? raw)
+    {
+        if (raw is null || raw.Count == 0)
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+
+        // Pre-normalize keys so the per-request lookup matches what NormalizeEmail produces.
+        // Skip empty entries so an unset env var (which Configuration binds as "") can't
+        // accidentally match a user request whose email is also somehow empty.
+        var normalized = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (email, pin) in raw)
+        {
+            if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(pin))
+                continue;
+            normalized[email.Trim().ToLowerInvariant()] = pin.Trim();
+        }
+        return normalized;
     }
 
     private static string CreateOpaqueToken()

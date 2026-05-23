@@ -11,6 +11,10 @@ public sealed class UserDto
 
     public string? DisplayName { get; init; }
 
+    public string? Nickname { get; init; }
+
+    public string? Handle { get; init; }
+
     public string? ImageUrl { get; init; }
 
     public bool EmailVerified { get; init; }

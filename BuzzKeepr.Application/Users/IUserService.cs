@@ -9,4 +9,6 @@ public interface IUserService
     Task<CreateUserResult> CreateAsync(CreateUserInput input, CancellationToken cancellationToken);
 
     Task<AcceptTermsResult> AcceptTermsAsync(Guid userId, CancellationToken cancellationToken);
+
+    Task<UpdateProfileResult> UpdateProfileAsync(Guid userId, UpdateProfileInput input, CancellationToken cancellationToken);
 }

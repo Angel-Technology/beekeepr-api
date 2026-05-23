@@ -10,6 +10,8 @@ public interface IUserRepository
 
     Task<bool> EmailExistsAsync(string email, CancellationToken cancellationToken);
 
+    Task<bool> HandleExistsAsync(string handle, Guid? excludeUserId, CancellationToken cancellationToken);
+
     Task AddAsync(User user, CancellationToken cancellationToken);
 
     Task SaveChangesAsync(CancellationToken cancellationToken);
