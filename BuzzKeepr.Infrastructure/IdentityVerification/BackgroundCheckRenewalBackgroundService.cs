@@ -9,12 +9,12 @@ using Microsoft.Extensions.Logging;
 
 namespace BuzzKeepr.Infrastructure.IdentityVerification;
 
-// For active subscribers, the Checkr badge is supposed to stay continuously valid: as soon as
-// it tips past `BackgroundCheckBadgeExpiresAtUtc`, this sweeper picks them up, re-runs the
-// instant criminal check (free re-use of the existing CheckrProfileId — Checkr bills the call,
-// we eat it as part of the subscription), and stamps a fresh expiry. Lapsed subscribers are
-// skipped — their badge timestamp simply ages past now() and the frontend treats it as expired
-// until they resubscribe (which lets the sweeper pick them back up).
+// The Checkr badge is supposed to stay continuously valid for any user who has ever earned one:
+// as soon as it tips past `BackgroundCheckBadgeExpiresAtUtc`, this sweeper picks them up,
+// re-runs the instant criminal check (re-uses the existing CheckrProfileId so Checkr's billed
+// call is the same flat rate), and stamps a fresh expiry. No subscription requirement — the
+// only gates are "has a Checkr profile" (i.e. already ran at least one check) and "badge is
+// past its expiry."
 public sealed class BackgroundCheckRenewalBackgroundService(
     IServiceScopeFactory scopeFactory,
     ILogger<BackgroundCheckRenewalBackgroundService> logger) : BackgroundService
@@ -57,17 +57,10 @@ public sealed class BackgroundCheckRenewalBackgroundService(
         var identityVerificationService = scope.ServiceProvider.GetRequiredService<IIdentityVerificationService>();
         var nowUtc = DateTime.UtcNow;
 
-        // We mirror SubscriptionDto.IsLocallyActive's logic here as an EF-translatable predicate
-        // so we don't pull every user into memory just to filter. Active = status is not None or
-        // Expired AND the current period hasn't ended (or is unbounded).
         var dueForRenewal = await dbContext.Users
             .Where(user => user.BackgroundCheckBadge != BackgroundCheckBadge.None
                 && user.BackgroundCheckBadgeExpiresAtUtc != null
                 && user.BackgroundCheckBadgeExpiresAtUtc < nowUtc
-                && user.SubscriptionStatus != SubscriptionStatus.None
-                && user.SubscriptionStatus != SubscriptionStatus.Expired
-                && (user.SubscriptionCurrentPeriodEndUtc == null
-                    || user.SubscriptionCurrentPeriodEndUtc > nowUtc)
                 && user.CheckrProfileId != null)
             .OrderBy(user => user.BackgroundCheckBadgeExpiresAtUtc)
             .Take(BatchSize)
@@ -84,7 +77,7 @@ public sealed class BackgroundCheckRenewalBackgroundService(
             try
             {
                 logger.LogInformation(
-                    "Renewing Checkr badge for user {UserId} (sub active, badge expired @ {ExpiresAt:o}).",
+                    "Renewing Checkr badge for user {UserId} (badge expired @ {ExpiresAt:o}).",
                     entry.Id,
                     entry.BackgroundCheckBadgeExpiresAtUtc);
 

@@ -440,7 +440,6 @@ public sealed class UserMutations
             SessionToken = result.SessionToken,
             IdentityVerificationStatus = result.IdentityVerificationStatus,
             PersonaInquiryStatus = result.PersonaInquiryStatus,
-            SubscriptionRequired = result.SubscriptionRequired,
             Error = result.Error
         };
     }

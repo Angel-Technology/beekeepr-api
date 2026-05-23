@@ -28,13 +28,11 @@ public sealed class BackgroundCheckRenewalTests(PostgresFixture postgres) : IAsy
     }
 
     [Fact]
-    public async Task Sweep_RenewsExpiredBadge_WhenSubscriptionIsActive()
+    public async Task Sweep_RenewsExpiredBadge()
     {
         var user = await SeedUserAsync(
             badge: BackgroundCheckBadge.Approved,
-            badgeExpiry: DateTime.UtcNow.AddMinutes(-5),
-            subscriptionStatus: SubscriptionStatus.Active,
-            subscriptionPeriodEnd: DateTime.UtcNow.AddDays(20));
+            badgeExpiry: DateTime.UtcNow.AddMinutes(-5));
 
         factory.FakeCheckrTrust.NextResult = new CreateInstantCriminalCheckResult
         {
@@ -64,9 +62,7 @@ public sealed class BackgroundCheckRenewalTests(PostgresFixture postgres) : IAsy
     {
         var user = await SeedUserAsync(
             badge: BackgroundCheckBadge.Approved,
-            badgeExpiry: DateTime.UtcNow.AddMinutes(-1),
-            subscriptionStatus: SubscriptionStatus.Active,
-            subscriptionPeriodEnd: DateTime.UtcNow.AddDays(15));
+            badgeExpiry: DateTime.UtcNow.AddMinutes(-1));
 
         factory.FakeCheckrTrust.NextResult = new CreateInstantCriminalCheckResult
         {
@@ -85,31 +81,38 @@ public sealed class BackgroundCheckRenewalTests(PostgresFixture postgres) : IAsy
     }
 
     [Fact]
-    public async Task Sweep_SkipsUsers_WhenSubscriptionIsExpired()
+    public async Task Sweep_RenewsExpiredBadge_RegardlessOfSubscriptionStatus()
     {
-        await SeedUserAsync(
-            badge: BackgroundCheckBadge.Approved,
-            badgeExpiry: DateTime.UtcNow.AddMinutes(-30),
-            subscriptionStatus: SubscriptionStatus.Expired,
-            subscriptionPeriodEnd: DateTime.UtcNow.AddDays(-1));
-
-        await SweepOnceAsync();
-
-        Assert.Empty(factory.FakeCheckrTrust.Calls);
-    }
-
-    [Fact]
-    public async Task Sweep_SkipsUsers_WhenSubscriptionIsNone()
-    {
-        await SeedUserAsync(
+        // Subscription is no longer a gate for badge renewal. Users with no subscription, an
+        // expired subscription, or a cancelled subscription should all be renewed if they have
+        // an existing Checkr profile and an expired badge.
+        var noSub = await SeedUserAsync(
             badge: BackgroundCheckBadge.Approved,
             badgeExpiry: DateTime.UtcNow.AddMinutes(-30),
             subscriptionStatus: SubscriptionStatus.None,
-            subscriptionPeriodEnd: null);
+            profileId: "prf_no_sub");
+
+        var expiredSub = await SeedUserAsync(
+            badge: BackgroundCheckBadge.Approved,
+            badgeExpiry: DateTime.UtcNow.AddMinutes(-20),
+            subscriptionStatus: SubscriptionStatus.Expired,
+            profileId: "prf_expired_sub");
+
+        factory.FakeCheckrTrust.NextResult = new CreateInstantCriminalCheckResult
+        {
+            Success = true,
+            CheckId = "chk_renewed",
+            ResultCount = 0,
+            HasPossibleMatches = false
+        };
 
         await SweepOnceAsync();
 
-        Assert.Empty(factory.FakeCheckrTrust.Calls);
+        Assert.Equal(2, factory.FakeCheckrTrust.Calls.Count);
+        var noSubStored = await ReloadAsync(noSub.Id);
+        var expiredStored = await ReloadAsync(expiredSub.Id);
+        Assert.True(noSubStored.BackgroundCheckBadgeExpiresAtUtc > DateTime.UtcNow.AddMonths(2));
+        Assert.True(expiredStored.BackgroundCheckBadgeExpiresAtUtc > DateTime.UtcNow.AddMonths(2));
     }
 
     [Fact]
@@ -117,40 +120,11 @@ public sealed class BackgroundCheckRenewalTests(PostgresFixture postgres) : IAsy
     {
         await SeedUserAsync(
             badge: BackgroundCheckBadge.Approved,
-            badgeExpiry: DateTime.UtcNow.AddDays(20),
-            subscriptionStatus: SubscriptionStatus.Active,
-            subscriptionPeriodEnd: DateTime.UtcNow.AddDays(20));
+            badgeExpiry: DateTime.UtcNow.AddDays(20));
 
         await SweepOnceAsync();
 
         Assert.Empty(factory.FakeCheckrTrust.Calls);
-    }
-
-    [Fact]
-    public async Task Sweep_HandlesCancelledButStillInPeriod_AsActive()
-    {
-        // After CANCELLATION the user keeps premium until current_period_end. We should still
-        // renew their badge during this window — they paid for it.
-        var user = await SeedUserAsync(
-            badge: BackgroundCheckBadge.Approved,
-            badgeExpiry: DateTime.UtcNow.AddMinutes(-5),
-            subscriptionStatus: SubscriptionStatus.Cancelled,
-            subscriptionPeriodEnd: DateTime.UtcNow.AddDays(10));
-
-        factory.FakeCheckrTrust.NextResult = new CreateInstantCriminalCheckResult
-        {
-            Success = true,
-            CheckId = "chk_cancel_grace",
-            ProfileId = "prf_seeded",
-            ResultCount = 0,
-            HasPossibleMatches = false
-        };
-
-        await SweepOnceAsync();
-
-        Assert.Single(factory.FakeCheckrTrust.Calls);
-        var stored = await ReloadAsync(user.Id);
-        Assert.Equal(BackgroundCheckBadge.Approved, stored.BackgroundCheckBadge);
     }
 
     private async Task SweepOnceAsync()
@@ -175,8 +149,8 @@ public sealed class BackgroundCheckRenewalTests(PostgresFixture postgres) : IAsy
     private async Task<User> SeedUserAsync(
         BackgroundCheckBadge badge,
         DateTime badgeExpiry,
-        SubscriptionStatus subscriptionStatus,
-        DateTime? subscriptionPeriodEnd)
+        SubscriptionStatus subscriptionStatus = SubscriptionStatus.None,
+        string profileId = "prf_seeded")
     {
         var email = $"renewal-{Guid.NewGuid():N}@buzzkeepr.test";
         var user = new User
@@ -187,18 +161,13 @@ public sealed class BackgroundCheckRenewalTests(PostgresFixture postgres) : IAsy
             CreatedAtUtc = DateTime.UtcNow.AddMonths(-3),
             VerifiedFirstName = "Renew",
             VerifiedLastName = "Tester",
-            CheckrProfileId = "prf_seeded",
-            CheckrLastCheckId = "chk_seeded",
+            CheckrProfileId = profileId,
+            CheckrLastCheckId = $"chk_seeded_{Guid.NewGuid():N}",
             CheckrLastCheckAtUtc = DateTime.UtcNow.AddMonths(-3),
             CheckrLastCheckHasPossibleMatches = false,
             BackgroundCheckBadge = badge,
             BackgroundCheckBadgeExpiresAtUtc = badgeExpiry,
-            SubscriptionStatus = subscriptionStatus,
-            SubscriptionEntitlement = subscriptionStatus == SubscriptionStatus.None ? null : "premium",
-            SubscriptionProductId = subscriptionStatus == SubscriptionStatus.None ? null : "premium_monthly",
-            SubscriptionStore = subscriptionStatus == SubscriptionStatus.None ? null : SubscriptionStore.AppStore,
-            SubscriptionCurrentPeriodEndUtc = subscriptionPeriodEnd,
-            SubscriptionWillRenew = subscriptionStatus == SubscriptionStatus.Active
+            SubscriptionStatus = subscriptionStatus
         };
 
         await using var scope = factory.Services.CreateAsyncScope();

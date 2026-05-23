@@ -1,6 +1,6 @@
 # Feature: Billing & Subscriptions — RevenueCat
 
-Status: **Mirror + webhook in place; no paid surfaces gated on it yet.** The frontend uses the RevenueCat SDK as the source of truth for "what can the user see right now." The backend mirrors entitlement state into the `users` table for server-side gating (e.g. "is this user actually paid before I let them run a paid background-check renewal?").
+Status: **Mirror + webhook in place; no server-side surfaces gated on it.** The frontend uses the RevenueCat SDK as the source of truth for "what can the user see right now." The backend mirrors entitlement state into the `users` table so it's available for support tooling and a future gate if/when we add one, but as of this rewrite **identity verification and background-check renewals do not require an active subscription** — those gates were removed.
 
 ## What it does
 
@@ -157,6 +157,6 @@ Calls to RevenueCat are bounded — only happens when the mirror is "not active"
 
 ## Known sharp edges
 
-- **First gated surface is `startPersonaInquiry`.** Identity verification is the entrance to the funnel — users must have an active subscription before we'll burn a Persona inquiry call. See `.claude/features/identity-verification-persona.md` → "Subscription gate" for the rules. Background check renewals are auto-handled by the renewal sweeper and are not gated as a user-facing action; the manual `startInstantCriminalCheck` mutation is intentionally ungated for now (revisit if/when we expose it directly to users).
+- **No server-side surfaces are currently gated.** `startPersonaInquiry`, `startInstantCriminalCheck`, and the auto-renewal sweeper all run regardless of subscription state. `BillingService.GetSubscriptionForUserAsync` is still wired (RevenueCat REST fallback included) and ready to be called from any new gate; nothing calls it right now. If you reintroduce a paid surface, put the gate in the service layer (not the resolver) and document the policy here so future devs can find it.
 - **No unhappy-path receipt validation.** RevenueCat handles store receipt validation; we trust their webhook. If we ever stop trusting them (or want a defense-in-depth check), add a server-side `validateReceipt` mutation that takes the receipt from the SDK and forwards to RevenueCat's REST API.
 - **No churn analytics on our side.** RevenueCat's dashboard owns this. If product asks for "users who cancelled in last 7 days" we'd need to query RevenueCat's REST API (export endpoints) rather than building our own report.

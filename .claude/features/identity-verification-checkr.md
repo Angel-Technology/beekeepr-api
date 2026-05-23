@@ -49,18 +49,15 @@ Checkr merges + de-duplicates the rulesets server-side, so a record only needs t
 
 ### Renewal model
 
-Active subscribers get **automatic renewal**. `BackgroundCheckRenewalBackgroundService` (`BuzzKeepr.Infrastructure/IdentityVerification/`) sweeps every 6 hours and re-runs the instant criminal check for any user matching:
+Every user who has ever earned a badge gets **automatic renewal** — no subscription requirement. `BackgroundCheckRenewalBackgroundService` (`BuzzKeepr.Infrastructure/IdentityVerification/`) sweeps every 6 hours and re-runs the instant criminal check for any user matching:
 
 - `BackgroundCheckBadge != None` AND
 - `BackgroundCheckBadgeExpiresAtUtc < now` AND
-- subscription is locally active (status not `None`/`Expired`, current period not yet ended) AND
 - has an existing `CheckrProfileId` (so the renewal uses the cheap profile-reuse path, not a fresh PII send)
 
-It calls `IIdentityVerificationService.CreateInstantCriminalCheckAsync` with empty input — the existing service code reuses the profile, runs the check, updates the badge based on results, and stamps a fresh 3-month expiry. Failures are logged and retried next pass; a subscription that lapses mid-renewal-cycle is simply skipped on subsequent passes.
+It calls `IIdentityVerificationService.CreateInstantCriminalCheckAsync` with empty input — the existing service code reuses the profile, runs the check, updates the badge based on results, and stamps a fresh 3-month expiry. Failures are logged and retried next pass.
 
-For **lapsed subscribers**, nothing happens automatically. Their `BackgroundCheckBadgeExpiresAtUtc` ages past `now()` and the frontend treats the badge as expired. If they resubscribe, the very next sweep picks them up (assuming their badge expiry is past, which it will be).
-
-This is the "we eat the Checkr cost as part of the subscription" model — the user pays for premium monthly; we re-verify them every 3 months on our dime.
+The Checkr per-call cost is absorbed by the platform across the board. If we ever need to restore a subscription gate to bound renewal spend, the predicate to add lives in `BackgroundCheckRenewalBackgroundService.SweepOnceAsync` (where the per-user `Where(...)` query is built) — keep the gate in EF-translatable form so the DB-side filter is preserved.
 
 ## GraphQL surface
 

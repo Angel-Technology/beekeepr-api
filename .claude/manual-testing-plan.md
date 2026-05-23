@@ -313,47 +313,16 @@ mutation { signInWithGoogle(input: { idToken: "eyJh..." }) {
 
 ## 12. Persona — start an inquiry
 
-(Make sure you're signed in with a bearer token.)
-
-### 12a. Subscription gate (negative case — run this first)
-
-A fresh user has no active subscription, so the gate should block. Before doing anything else:
+(Make sure you're signed in with a bearer token. The subscription gate that used to block this surface has been removed — any authenticated user can start an inquiry.)
 
 ```graphql
 mutation { startPersonaInquiry {
-  success createdNewInquiry inquiryId subscriptionRequired error
+  success createdNewInquiry inquiryId identityVerificationStatus personaInquiryStatus error
 } }
 ```
+**Expect**: `inquiryId` is `inq_…`, `createdNewInquiry: true`, `identityVerificationStatus: CREATED` or `PENDING`.
 
-**Expect**: `success: false`, `subscriptionRequired: true`, `error: "Active subscription required to start identity verification."` Persona dashboard shows **no** new inquiry — the gate blocked before any Persona call.
-
-### 12b. Mark the user as subscribed and retry
-
-To unblock without going through the actual RevenueCat purchase loop, fire a synthetic `INITIAL_PURCHASE` webhook (see phase 16.6a) — that flips `SubscriptionStatus` to `Trialing`, which is enough to satisfy the gate.
-
-Or, for a quick local hack:
-
-```sql
-UPDATE "Users"
-SET "SubscriptionStatus" = 'Trialing',
-    "SubscriptionEntitlement" = 'premium',
-    "SubscriptionProductId" = 'premium_monthly',
-    "SubscriptionStore" = 'AppStore',
-    "SubscriptionCurrentPeriodEndUtc" = now() + interval '7 days',
-    "SubscriptionWillRenew" = true
-WHERE "Email" = 'you@example.com';
-```
-
-### 12c. Now create the inquiry
-
-```graphql
-mutation { startPersonaInquiry {
-  success createdNewInquiry inquiryId identityVerificationStatus personaInquiryStatus error subscriptionRequired
-} }
-```
-**Expect**: `inquiryId` is `inq_…`, `createdNewInquiry: true`, `subscriptionRequired: false`, `identityVerificationStatus: CREATED` or `PENDING`.
-
-Run it again immediately → `createdNewInquiry: false`, **same inquiryId** (reuse path — works even if you re-`UPDATE` the sub back to `Expired` first, since reuse bypasses the gate).
+Run it again immediately → `createdNewInquiry: false`, **same inquiryId** (reuse path — backend doesn't burn a second Persona call for an in-progress inquiry).
 
 ---
 
@@ -712,13 +681,12 @@ WHERE "Id" = '<USER_ID>';
 
 ---
 
-## 16.7 Background check renewal sweeper (auto-renewal for active subscribers)
+## 16.7 Background check renewal sweeper
 
-`BackgroundCheckRenewalBackgroundService` runs every 6 hours and re-runs the Checkr instant criminal check for any user whose badge has expired *and* whose subscription is still active. To trigger immediately without waiting:
+`BackgroundCheckRenewalBackgroundService` runs every 6 hours and re-runs the Checkr instant criminal check for any user with an existing `CheckrProfileId` and an expired badge. Subscription state is **not** a factor — the gate was removed. To trigger immediately without waiting:
 
 1. Make sure the user has a Checkr profile already (run phase 14 at least once).
-2. Make sure the user has an active subscription (run phase 16.6a to fire an `INITIAL_PURCHASE` webhook).
-3. Force the badge expiry into the past:
+2. Force the badge expiry into the past:
 
 ```sql
 UPDATE "Users"
@@ -726,15 +694,15 @@ SET "BackgroundCheckBadgeExpiresAtUtc" = now() - interval '1 hour'
 WHERE "Email" = 'you@example.com';
 ```
 
-4. Restart the API — the sweeper runs immediately on host startup.
-5. Watch logs:
+3. Restart the API — the sweeper runs immediately on host startup.
+4. Watch logs:
 
 ```
-Renewing Checkr badge for user <id> (sub active, badge expired @ <ts>).
+Renewing Checkr badge for user <id> (badge expired @ <ts>).
 Background check renewal sweep: 1/1 renewed, 0 failed.
 ```
 
-6. Verify in DB:
+5. Verify in DB:
 
 ```sql
 SELECT "BackgroundCheckBadge", "BackgroundCheckBadgeExpiresAtUtc",
@@ -744,16 +712,177 @@ FROM "Users" WHERE "Email" = 'you@example.com';
 
 → `CheckrLastCheckId` is a fresh UUID, `CheckrLastCheckAtUtc` is just now, `BackgroundCheckBadgeExpiresAtUtc` is ~3 months in the future.
 
-**Negative case (subscription not active):**
+**Verify subscription state is no longer a gate:** set `SubscriptionStatus = 'Expired'` alongside the expiry push-back and confirm the sweeper still renews. (Previously this was the negative case — now it's a regression check.)
+
+---
+
+## 16.8 Identity-verification state recipes
+
+Quick one-shot UPDATEs to put your user into any meaningful verification state. Useful for exercising the frontend without having to walk a real ID through Persona + Checkr each time.
+
+Replace `you@example.com` with your address. Open psql once:
+
+```
+docker exec -it buzzkeepr-postgres psql -U postgres -d buzzkeepr_dev
+```
+
+Then paste whichever state you need. Refetch `currentUser` on the frontend after each (sign-out/in or pull-to-refresh) — most clients cache it.
+
+**Quick state-check (run any time):**
+
+```sql
+SELECT "Email", "IdentityVerificationStatus", "PersonaInquiryStatus",
+       "BackgroundCheckBadge", "BackgroundCheckBadgeExpiresAtUtc",
+       "CheckrLastCheckHasPossibleMatches"
+FROM "Users" WHERE "Email" = 'you@example.com';
+```
+
+### Reset to "just signed up"
 
 ```sql
 UPDATE "Users"
-SET "BackgroundCheckBadgeExpiresAtUtc" = now() - interval '1 hour',
-    "SubscriptionStatus" = 'Expired'
+SET "IdentityVerificationStatus" = 'NotStarted',
+    "PersonaInquiryId" = NULL, "PersonaInquiryStatus" = NULL,
+    "PersonaInquiryUpdatedAtUtc" = NULL, "PersonaVerifiedAtUtc" = NULL,
+    "VerifiedFirstName" = NULL, "VerifiedMiddleName" = NULL, "VerifiedLastName" = NULL,
+    "VerifiedBirthdate" = NULL, "VerifiedLicenseState" = NULL, "PhoneNumber" = NULL,
+    "CheckrProfileId" = NULL, "CheckrLastCheckId" = NULL,
+    "CheckrLastCheckAtUtc" = NULL, "CheckrLastCheckHasPossibleMatches" = NULL,
+    "BackgroundCheckBadge" = 'None', "BackgroundCheckBadgeExpiresAtUtc" = NULL
 WHERE "Email" = 'you@example.com';
 ```
 
-Restart the API. Logs show no renewal for this user; their badge expiry stays in the past. The frontend will treat the badge as invalid.
+### Persona Pending (started but not finished)
+
+```sql
+UPDATE "Users"
+SET "IdentityVerificationStatus" = 'Pending',
+    "PersonaInquiryId" = 'inq_test_pending',
+    "PersonaInquiryStatus" = 'Pending',
+    "PersonaInquiryUpdatedAtUtc" = now(),
+    "PersonaVerifiedAtUtc" = NULL,
+    "VerifiedFirstName" = NULL, "VerifiedMiddleName" = NULL, "VerifiedLastName" = NULL,
+    "VerifiedBirthdate" = NULL, "VerifiedLicenseState" = NULL,
+    "CheckrProfileId" = NULL, "CheckrLastCheckId" = NULL,
+    "CheckrLastCheckAtUtc" = NULL, "CheckrLastCheckHasPossibleMatches" = NULL,
+    "BackgroundCheckBadge" = 'None', "BackgroundCheckBadgeExpiresAtUtc" = NULL
+WHERE "Email" = 'you@example.com';
+```
+
+### Persona Declined (retryable — user can re-run `startPersonaInquiry`)
+
+```sql
+UPDATE "Users"
+SET "IdentityVerificationStatus" = 'Declined',
+    "PersonaInquiryId" = 'inq_test_declined',
+    "PersonaInquiryStatus" = 'Declined',
+    "PersonaInquiryUpdatedAtUtc" = now(),
+    "PersonaVerifiedAtUtc" = NULL,
+    "VerifiedFirstName" = NULL, "VerifiedMiddleName" = NULL, "VerifiedLastName" = NULL,
+    "VerifiedBirthdate" = NULL, "VerifiedLicenseState" = NULL,
+    "CheckrProfileId" = NULL, "CheckrLastCheckId" = NULL,
+    "CheckrLastCheckAtUtc" = NULL, "CheckrLastCheckHasPossibleMatches" = NULL,
+    "BackgroundCheckBadge" = 'None', "BackgroundCheckBadgeExpiresAtUtc" = NULL
+WHERE "Email" = 'you@example.com';
+```
+
+### Persona NeedsReview (submitted, Persona flagged for human)
+
+```sql
+UPDATE "Users"
+SET "IdentityVerificationStatus" = 'NeedsReview',
+    "PersonaInquiryId" = 'inq_test_review',
+    "PersonaInquiryStatus" = 'NeedsReview',
+    "PersonaInquiryUpdatedAtUtc" = now(),
+    "PersonaVerifiedAtUtc" = now(),
+    "VerifiedFirstName" = 'Test', "VerifiedLastName" = 'User',
+    "VerifiedBirthdate" = '1995-01-15', "VerifiedLicenseState" = 'NY',
+    "CheckrProfileId" = NULL, "CheckrLastCheckId" = NULL,
+    "CheckrLastCheckAtUtc" = NULL, "CheckrLastCheckHasPossibleMatches" = NULL,
+    "BackgroundCheckBadge" = 'None', "BackgroundCheckBadgeExpiresAtUtc" = NULL
+WHERE "Email" = 'you@example.com';
+```
+
+### Partial — Persona Approved, Checkr not yet run
+
+```sql
+UPDATE "Users"
+SET "IdentityVerificationStatus" = 'Approved',
+    "PersonaInquiryId" = 'inq_test_partial',
+    "PersonaInquiryStatus" = 'Approved',
+    "PersonaInquiryUpdatedAtUtc" = now(),
+    "PersonaVerifiedAtUtc" = now(),
+    "VerifiedFirstName" = 'Test', "VerifiedLastName" = 'User',
+    "VerifiedBirthdate" = '1995-01-15', "VerifiedLicenseState" = 'NY',
+    "CheckrProfileId" = NULL, "CheckrLastCheckId" = NULL,
+    "CheckrLastCheckAtUtc" = NULL, "CheckrLastCheckHasPossibleMatches" = NULL,
+    "BackgroundCheckBadge" = 'None', "BackgroundCheckBadgeExpiresAtUtc" = NULL
+WHERE "Email" = 'you@example.com';
+```
+
+### Passed — Persona Approved + Checkr clean → Approved badge
+
+```sql
+UPDATE "Users"
+SET "IdentityVerificationStatus" = 'Approved',
+    "PersonaInquiryId" = 'inq_test_passed',
+    "PersonaInquiryStatus" = 'Approved',
+    "PersonaInquiryUpdatedAtUtc" = now(),
+    "PersonaVerifiedAtUtc" = now(),
+    "VerifiedFirstName" = 'Test', "VerifiedLastName" = 'User',
+    "VerifiedBirthdate" = '1995-01-15', "VerifiedLicenseState" = 'NY',
+    "CheckrProfileId" = 'prf_test_passed',
+    "CheckrLastCheckId" = 'chk_test_passed',
+    "CheckrLastCheckAtUtc" = now(),
+    "CheckrLastCheckHasPossibleMatches" = false,
+    "BackgroundCheckBadge" = 'Approved',
+    "BackgroundCheckBadgeExpiresAtUtc" = now() + interval '3 months'
+WHERE "Email" = 'you@example.com';
+```
+
+### Failed — Persona Approved + Checkr matches → Denied badge
+
+```sql
+UPDATE "Users"
+SET "IdentityVerificationStatus" = 'Approved',
+    "PersonaInquiryId" = 'inq_test_failed',
+    "PersonaInquiryStatus" = 'Approved',
+    "PersonaInquiryUpdatedAtUtc" = now(),
+    "PersonaVerifiedAtUtc" = now(),
+    "VerifiedFirstName" = 'Test', "VerifiedLastName" = 'User',
+    "VerifiedBirthdate" = '1995-01-15', "VerifiedLicenseState" = 'NY',
+    "CheckrProfileId" = 'prf_test_failed',
+    "CheckrLastCheckId" = 'chk_test_failed',
+    "CheckrLastCheckAtUtc" = now(),
+    "CheckrLastCheckHasPossibleMatches" = true,
+    "BackgroundCheckBadge" = 'Denied',
+    "BackgroundCheckBadgeExpiresAtUtc" = now() + interval '3 months'
+WHERE "Email" = 'you@example.com';
+```
+
+### Expired badge (was Approved, now past expiry)
+
+Use this to test the "renew your check" UX or to manually trigger the renewal sweeper (phase 16.7).
+
+```sql
+UPDATE "Users"
+SET "IdentityVerificationStatus" = 'Approved',
+    "PersonaInquiryId" = 'inq_test_expired',
+    "PersonaInquiryStatus" = 'Approved',
+    "PersonaInquiryUpdatedAtUtc" = now() - interval '4 months',
+    "PersonaVerifiedAtUtc" = now() - interval '4 months',
+    "VerifiedFirstName" = 'Test', "VerifiedLastName" = 'User',
+    "VerifiedBirthdate" = '1995-01-15', "VerifiedLicenseState" = 'NY',
+    "CheckrProfileId" = 'prf_test_expired',
+    "CheckrLastCheckId" = 'chk_test_expired',
+    "CheckrLastCheckAtUtc" = now() - interval '4 months',
+    "CheckrLastCheckHasPossibleMatches" = false,
+    "BackgroundCheckBadge" = 'Approved',
+    "BackgroundCheckBadgeExpiresAtUtc" = now() - interval '1 day'
+WHERE "Email" = 'you@example.com';
+```
+
+> **Heads up — the renewal sweeper will eat synthetic CheckrProfileIds.** The fake `prf_test_*` ids above won't exist in Checkr, so when `BackgroundCheckRenewalBackgroundService` next runs (every 6 hours, plus on each API start) it will call Checkr with `profile_id=prf_test_expired` and fail. The check stays in its current state and the sweeper retries next pass. If that's noisy, either clear `CheckrProfileId` after the test or stop the API while testing.
 
 ---
 
