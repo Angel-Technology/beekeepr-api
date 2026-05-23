@@ -14,7 +14,7 @@ public sealed class UserService(
 {
     private const int NicknameMaxLength = 50;
 
-    private static readonly Regex HandleFormat = new("^@[a-zA-Z0-9_]{3,20}$", RegexOptions.Compiled);
+    private static readonly Regex HandleFormat = new("^[a-zA-Z0-9_]{3,20}$", RegexOptions.Compiled);
 
 
     public async Task<UserDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
@@ -177,6 +177,58 @@ public sealed class UserService(
         };
     }
 
+    public async Task<RequestAccountDeletionResult> RequestAccountDeletionAsync(
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var user = await userRepository.GetByIdForUpdateIncludingDeletedAsync(userId, cancellationToken);
+
+        if (user is null)
+        {
+            return new RequestAccountDeletionResult { UserNotFound = true };
+        }
+
+        if (user.DeletedAtUtc is null)
+        {
+            user.DeletedAtUtc = DateTime.UtcNow;
+            await userRepository.SaveChangesAsync(cancellationToken);
+            logger.LogInformation(
+                "User {UserId} requested account deletion; hard-delete will run after the 72-hour grace period.",
+                user.Id);
+        }
+
+        return new RequestAccountDeletionResult
+        {
+            Success = true,
+            User = MapUser(user)
+        };
+    }
+
+    public async Task<CancelAccountDeletionResult> CancelAccountDeletionAsync(
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var user = await userRepository.GetByIdForUpdateIncludingDeletedAsync(userId, cancellationToken);
+
+        if (user is null)
+        {
+            return new CancelAccountDeletionResult { UserNotFound = true };
+        }
+
+        if (user.DeletedAtUtc is not null)
+        {
+            user.DeletedAtUtc = null;
+            await userRepository.SaveChangesAsync(cancellationToken);
+            logger.LogInformation("User {UserId} cancelled pending account deletion.", user.Id);
+        }
+
+        return new CancelAccountDeletionResult
+        {
+            Success = true,
+            User = MapUser(user)
+        };
+    }
+
     private static UserDto MapUser(User user)
     {
         return new UserDto
@@ -202,7 +254,8 @@ public sealed class UserService(
             BackgroundCheckBadgeExpiresAtUtc = user.BackgroundCheckBadgeExpiresAtUtc,
             TermsAcceptedAtUtc = user.TermsAcceptedAtUtc,
             Subscription = SubscriptionDto.FromUser(user),
-            CreatedAtUtc = user.CreatedAtUtc
+            CreatedAtUtc = user.CreatedAtUtc,
+            DeletedAtUtc = user.DeletedAtUtc
         };
     }
 }

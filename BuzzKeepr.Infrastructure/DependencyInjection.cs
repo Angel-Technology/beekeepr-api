@@ -118,6 +118,7 @@ public static class DependencyInjection
         services.AddHostedService<Auth.SessionCleanupBackgroundService>();
         services.AddHostedService<Auth.WelcomeEmailSweeperBackgroundService>();
         services.AddHostedService<IdentityVerification.BackgroundCheckRenewalBackgroundService>();
+        services.AddHostedService<Users.AccountDeletionPurgeBackgroundService>();
 
         return services;
     }

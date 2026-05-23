@@ -48,4 +48,6 @@ public sealed class UserDto
     public SubscriptionDto Subscription { get; init; } = new();
 
     public DateTime CreatedAtUtc { get; init; }
+
+    public DateTime? DeletedAtUtc { get; init; }
 }

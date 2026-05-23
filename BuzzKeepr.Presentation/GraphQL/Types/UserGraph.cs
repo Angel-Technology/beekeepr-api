@@ -29,7 +29,8 @@ public sealed class UserGraph
         BackgroundCheckBadgeExpiresAtUtc = user.BackgroundCheckBadgeExpiresAtUtc,
         TermsAcceptedAtUtc = user.TermsAcceptedAtUtc,
         Subscription = user.Subscription,
-        CreatedAtUtc = user.CreatedAtUtc
+        CreatedAtUtc = user.CreatedAtUtc,
+        DeletedAtUtc = user.DeletedAtUtc
     };
 
     public Guid Id { get; init; }
@@ -75,4 +76,6 @@ public sealed class UserGraph
     public SubscriptionDto Subscription { get; init; } = new();
 
     public DateTime CreatedAtUtc { get; init; }
+
+    public DateTime? DeletedAtUtc { get; init; }
 }

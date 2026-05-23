@@ -74,6 +74,8 @@ public sealed class User
 
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 
+    public DateTime? DeletedAtUtc { get; set; }
+
     public ICollection<ExternalAccount> ExternalAccounts { get; set; } = new List<ExternalAccount>();
 
     public ICollection<Session> Sessions { get; set; } = new List<Session>();

@@ -29,7 +29,7 @@ public sealed class BuzzKeeprDbContext(DbContextOptions<BuzzKeeprDbContext> opti
                 .HasMaxLength(50);
 
             builder.Property(user => user.Handle)
-                .HasMaxLength(21);
+                .HasMaxLength(20);
 
             builder.Property(user => user.ImageUrl)
                 .HasMaxLength(2048);
@@ -116,6 +116,11 @@ public sealed class BuzzKeeprDbContext(DbContextOptions<BuzzKeeprDbContext> opti
 
             builder.Property(user => user.RevenueCatAppUserId)
                 .HasMaxLength(200);
+
+            builder.Property(user => user.DeletedAtUtc)
+                .HasColumnType("timestamp with time zone");
+
+            builder.HasQueryFilter(user => user.DeletedAtUtc == null);
 
             builder.HasIndex(user => user.Email)
                 .IsUnique();

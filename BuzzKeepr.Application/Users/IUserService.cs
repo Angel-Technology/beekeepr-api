@@ -11,4 +11,8 @@ public interface IUserService
     Task<AcceptTermsResult> AcceptTermsAsync(Guid userId, CancellationToken cancellationToken);
 
     Task<UpdateProfileResult> UpdateProfileAsync(Guid userId, UpdateProfileInput input, CancellationToken cancellationToken);
+
+    Task<RequestAccountDeletionResult> RequestAccountDeletionAsync(Guid userId, CancellationToken cancellationToken);
+
+    Task<CancelAccountDeletionResult> CancelAccountDeletionAsync(Guid userId, CancellationToken cancellationToken);
 }

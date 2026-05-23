@@ -210,6 +210,7 @@ public sealed class AuthService(
         else
         {
             user.EmailVerified = true;
+            RecoverIfPendingDeletion(user);
         }
 
         verificationToken.ConsumedAtUtc = nowUtc;
@@ -278,11 +279,14 @@ public sealed class AuthService(
             user = externalAccount.User;
             externalAccount.ProviderEmail = normalizedEmail;
             externalAccount.LastSignInAtUtc = nowUtc;
+            RecoverIfPendingDeletion(user);
         }
         else
         {
             var existingUser = await authRepository.GetUserByEmailAsync(normalizedEmail, cancellationToken);
             isNewUser = existingUser is null;
+            if (existingUser is not null)
+                RecoverIfPendingDeletion(existingUser);
 
             user = existingUser ?? new User
             {
@@ -346,6 +350,18 @@ public sealed class AuthService(
     private static string NormalizeEmail(string email)
     {
         return email.Trim().ToLowerInvariant();
+    }
+
+    private void RecoverIfPendingDeletion(User user)
+    {
+        if (user.DeletedAtUtc is null)
+            return;
+
+        logger.LogInformation(
+            "User {UserId} signed in during deletion grace period (DeletedAtUtc={DeletedAtUtc:o}); clearing deletion flag.",
+            user.Id,
+            user.DeletedAtUtc);
+        user.DeletedAtUtc = null;
     }
 
     private static IReadOnlyDictionary<string, string> BuildReviewAccountPins(
@@ -433,7 +449,10 @@ public sealed class AuthService(
             BackgroundCheckBadgeExpiresAtUtc = user.BackgroundCheckBadgeExpiresAtUtc,
             TermsAcceptedAtUtc = user.TermsAcceptedAtUtc,
             Subscription = SubscriptionDto.FromUser(user),
-            CreatedAtUtc = user.CreatedAtUtc
+            CreatedAtUtc = user.CreatedAtUtc,
+            DeletedAtUtc = user.DeletedAtUtc,
+            Nickname = user.Nickname,
+            Handle = user.Handle
         };
     }
 }

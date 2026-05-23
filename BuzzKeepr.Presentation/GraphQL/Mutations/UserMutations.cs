@@ -313,7 +313,7 @@ public sealed class UserMutations
         {
             return new UpdateProfilePayload
             {
-                Error = "Handle must start with @ followed by 3-20 letters, numbers, or underscores."
+                Error = "Handle must be 3-20 letters, numbers, or underscores."
             };
         }
 
@@ -334,6 +334,76 @@ public sealed class UserMutations
         }
 
         return new UpdateProfilePayload
+        {
+            User = UserGraph.From(result.User)
+        };
+    }
+
+    public async Task<RequestAccountDeletionPayload> RequestAccountDeletionAsync(
+        [Service] IAuthService authService,
+        [Service] IUserService userService,
+        [Service] IHttpContextAccessor httpContextAccessor,
+        CancellationToken cancellationToken)
+    {
+        var httpContext = httpContextAccessor.HttpContext
+            ?? throw new InvalidOperationException("HTTP context is required for account deletion.");
+
+        var currentUser = await SessionRefresher.ResolveAsync(httpContext, authService, cancellationToken);
+
+        if (currentUser.User is null)
+        {
+            return new RequestAccountDeletionPayload
+            {
+                Error = "Authentication is required."
+            };
+        }
+
+        var result = await userService.RequestAccountDeletionAsync(currentUser.User.Id, cancellationToken);
+
+        if (result.UserNotFound || !result.Success || result.User is null)
+        {
+            return new RequestAccountDeletionPayload
+            {
+                Error = "Unable to request account deletion."
+            };
+        }
+
+        return new RequestAccountDeletionPayload
+        {
+            User = UserGraph.From(result.User)
+        };
+    }
+
+    public async Task<CancelAccountDeletionPayload> CancelAccountDeletionAsync(
+        [Service] IAuthService authService,
+        [Service] IUserService userService,
+        [Service] IHttpContextAccessor httpContextAccessor,
+        CancellationToken cancellationToken)
+    {
+        var httpContext = httpContextAccessor.HttpContext
+            ?? throw new InvalidOperationException("HTTP context is required for cancelling account deletion.");
+
+        var currentUser = await SessionRefresher.ResolveAsync(httpContext, authService, cancellationToken);
+
+        if (currentUser.User is null)
+        {
+            return new CancelAccountDeletionPayload
+            {
+                Error = "Authentication is required."
+            };
+        }
+
+        var result = await userService.CancelAccountDeletionAsync(currentUser.User.Id, cancellationToken);
+
+        if (result.UserNotFound || !result.Success || result.User is null)
+        {
+            return new CancelAccountDeletionPayload
+            {
+                Error = "Unable to cancel account deletion."
+            };
+        }
+
+        return new CancelAccountDeletionPayload
         {
             User = UserGraph.From(result.User)
         };
