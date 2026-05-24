@@ -144,8 +144,11 @@ app.MapPost("/webhooks/persona", async (
     HttpContext httpContext,
     PersonaWebhookSignatureVerifier signatureVerifier,
     IIdentityVerificationService identityVerificationService,
+    ILoggerFactory loggerFactory,
     CancellationToken cancellationToken) =>
 {
+    var logger = loggerFactory.CreateLogger("BuzzKeepr.API.PersonaWebhook");
+
     httpContext.Request.EnableBuffering();
 
     using var reader = new StreamReader(httpContext.Request.Body, leaveOpen: true);
@@ -154,8 +157,28 @@ app.MapPost("/webhooks/persona", async (
 
     var signatureHeader = httpContext.Request.Headers["Persona-Signature"].ToString();
 
+    // Raw stdout write bypasses every ILogger filter. If this line shows up in Render logs
+    // but the LogInformation lines below don't, the issue is ILogger config (env var override
+    // or appsettings filter), not stdout capture. Keep it until we've confirmed observability,
+    // then delete.
+    Console.WriteLine($"[PERSONA-WEBHOOK] received reqId={httpContext.TraceIdentifier} bodyLen={rawRequestBody.Length} sigHeaderPresent={!string.IsNullOrEmpty(signatureHeader)}");
+    logger.LogInformation(
+        "Persona webhook received: reqId={RequestId}, body size={BodySize}, signature header present={SignaturePresent}.",
+        httpContext.TraceIdentifier,
+        rawRequestBody.Length,
+        !string.IsNullOrEmpty(signatureHeader));
+
     if (!signatureVerifier.IsValid(signatureHeader, rawRequestBody))
+    {
+        logger.LogWarning(
+            "Persona webhook rejected: signature verification failed. reqId={RequestId}.",
+            httpContext.TraceIdentifier);
         return Results.Unauthorized();
+    }
+
+    logger.LogInformation(
+        "Persona webhook signature verified; dispatching to processor. reqId={RequestId}.",
+        httpContext.TraceIdentifier);
 
     await identityVerificationService.ProcessPersonaWebhookAsync(rawRequestBody, cancellationToken);
 

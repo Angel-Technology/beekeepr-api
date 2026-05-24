@@ -215,12 +215,18 @@ public sealed class IdentityVerificationService(
             return;
         }
 
+        // Strictly-older drop only. Persona can stamp consecutive state transitions
+        // (e.g. `completed` → `approved`) with the same `updated-at` when they fire close
+        // together; using `<=` here dropped the approved event in prod, leaving the user
+        // stuck at Completed. Re-applying an equal-timestamp event is idempotent: status
+        // writes are overwrites, PII writes are guarded by `verifiedDataAlreadyPresent`,
+        // and the welcome-email send is guarded by `WelcomeEmailSentAtUtc`.
         if (inquiryUpdatedAtUtc.HasValue
             && user.PersonaInquiryUpdatedAtUtc.HasValue
-            && inquiryUpdatedAtUtc.Value <= user.PersonaInquiryUpdatedAtUtc.Value)
+            && inquiryUpdatedAtUtc.Value < user.PersonaInquiryUpdatedAtUtc.Value)
         {
             logger.LogInformation(
-                "Skipping stale Persona webhook for inquiry {InquiryId}: event @{IncomingUpdatedAt:o} is not newer than stored @{StoredUpdatedAt:o}.",
+                "Skipping stale Persona webhook for inquiry {InquiryId}: event @{IncomingUpdatedAt:o} is older than stored @{StoredUpdatedAt:o}.",
                 inquiryId,
                 inquiryUpdatedAtUtc.Value,
                 user.PersonaInquiryUpdatedAtUtc.Value);
