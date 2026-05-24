@@ -38,6 +38,15 @@ services:
       - { key: CheckrTrust__RulesetIds__0,    sync: false }
       - { key: CheckrTrust__RulesetIds__1,    sync: false }
       - { key: Auth__AppApiKey,               sync: false }
+      # App-store reviewer backdoor — see .claude/features/authentication-email-signin.md.
+      # Indexed list of {Email, Pin} pairs (Render rejects '@' in env-var keys, so we can't
+      # use email-keyed env vars). Set Email + Pin per slot in Render UI. Reviewers sign in
+      # with their configured email + PIN instead of an emailed code. Remove the entries
+      # once review is approved. Add more slots (__2__, __3__, …) for additional reviewers.
+      - { key: Auth__ReviewAccounts__0__Email, sync: false }  # e.g. appstore-review@buzzkeepr.com
+      - { key: Auth__ReviewAccounts__0__Pin,   sync: false }  # 5-digit PIN
+      - { key: Auth__ReviewAccounts__1__Email, sync: false }  # e.g. playstore-review@buzzkeepr.com
+      - { key: Auth__ReviewAccounts__1__Pin,   sync: false }  # 5-digit PIN
       - { key: RevenueCat__SecretApiKey,            sync: false }
       - { key: RevenueCat__WebhookAuthorizationToken, sync: false }
       - { key: Sentry__Dsn,                   sync: false }
@@ -75,6 +84,15 @@ services:
       - { key: CheckrTrust__RulesetIds__0,    sync: false }
       - { key: CheckrTrust__RulesetIds__1,    sync: false }
       - { key: Auth__AppApiKey,               sync: false }
+      # App-store reviewer backdoor — see .claude/features/authentication-email-signin.md.
+      # Indexed list of {Email, Pin} pairs (Render rejects '@' in env-var keys, so we can't
+      # use email-keyed env vars). Set Email + Pin per slot in Render UI. Reviewers sign in
+      # with their configured email + PIN instead of an emailed code. Remove the entries
+      # once review is approved. Add more slots (__2__, __3__, …) for additional reviewers.
+      - { key: Auth__ReviewAccounts__0__Email, sync: false }  # e.g. appstore-review@buzzkeepr.com
+      - { key: Auth__ReviewAccounts__0__Pin,   sync: false }  # 5-digit PIN
+      - { key: Auth__ReviewAccounts__1__Email, sync: false }  # e.g. playstore-review@buzzkeepr.com
+      - { key: Auth__ReviewAccounts__1__Pin,   sync: false }  # 5-digit PIN
       - { key: RevenueCat__SecretApiKey,            sync: false }
       - { key: RevenueCat__WebhookAuthorizationToken, sync: false }
       - { key: Sentry__Dsn,                   sync: false }

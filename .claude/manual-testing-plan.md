@@ -121,6 +121,79 @@ mutation { verifyEmailSignIn(input: { email: "you@example.com", code: "12345" })
 
 ---
 
+## 4.5 App-store reviewer backdoor (`Auth:ReviewAccounts`)
+
+Apple / Google app reviewers can't receive Resend emails (corporate proxy), so we let configured emails sign in with a fixed PIN instead of an emailed code. This phase verifies the bypass works end-to-end and that the rest of the flow is unchanged.
+
+### 4.5.1 One-time local config
+
+Set a reviewer entry in user-secrets so the dev API has something to match against. The shape is an indexed list — set Email and Pin for slot 0:
+
+```bash
+dotnet user-secrets set "Auth:ReviewAccounts:0:Email" "appstore-review@buzzkeepr.test" \
+  --project BuzzKeepr.Presentation/BuzzKeepr.Presentation.csproj
+dotnet user-secrets set "Auth:ReviewAccounts:0:Pin" "98765" \
+  --project BuzzKeepr.Presentation/BuzzKeepr.Presentation.csproj
+```
+
+Restart the API.
+
+### 4.5.2 Request the code — no email goes out
+
+```graphql
+mutation { requestEmailSignIn(input: { email: "appstore-review@buzzkeepr.test" }) {
+  success email expiresAtUtc error
+} }
+```
+
+**Expect**: `success: true`, `error: null`, `expiresAtUtc` ~15 min out (identical to the normal path's GraphQL response).
+
+**Verify side effects**:
+- **Resend dashboard: NO send recorded for this email.** This is the key difference from phase 4.1 — the inbox isn't relayed.
+- DB: row appears in `VerificationTokens` with `purpose='EmailSignIn'`, `consumed_at_utc=NULL`. `token_hash` is the SHA-256 of `98765`.
+
+### 4.5.3 Verify with the configured PIN
+
+```graphql
+mutation { verifyEmailSignIn(input: { email: "appstore-review@buzzkeepr.test", code: "98765" }) {
+  user { id email emailVerified }
+  session { token expiresAtUtc }
+  error
+} }
+```
+
+**Expect**: session token returned, user created with `emailVerified: true`. From this point on, the reviewer account is identical to any other user — verified-identity flow, terms acceptance, etc. all work normally.
+
+### 4.5.4 Wrong PIN still rate-limits
+
+Submit the wrong code five times in a row. On the 6th attempt the row's `failed_attempts` will be at 5 and the token is locked. This mirrors the normal path — no separate code path for reviewers.
+
+### 4.5.5 Negative: non-configured email falls back to the normal flow
+
+Hit `requestEmailSignIn` with an email that **isn't** in `Auth:ReviewAccounts`. Expect a real Resend send + a random 5-digit code in the inbox. Proves the backdoor only kicks in for explicitly-listed emails.
+
+### 4.5.6 Remove the entry when done
+
+```bash
+dotnet user-secrets remove "Auth:ReviewAccounts:0:Email" \
+  --project BuzzKeepr.Presentation/BuzzKeepr.Presentation.csproj
+dotnet user-secrets remove "Auth:ReviewAccounts:0:Pin" \
+  --project BuzzKeepr.Presentation/BuzzKeepr.Presentation.csproj
+```
+
+Restart. Same email now lands on the real Resend path and the fixed PIN no longer works (expect `InvalidToken`).
+
+### Production setup (Render)
+
+Per `render.yaml`, both `buzzkeepr-api-prod` and `buzzkeepr-api-develop` declare two indexed reviewer slots with `sync: false`:
+
+- `Auth__ReviewAccounts__0__Email` / `Auth__ReviewAccounts__0__Pin`
+- `Auth__ReviewAccounts__1__Email` / `Auth__ReviewAccounts__1__Pin`
+
+Set Email + Pin per slot in Render UI → service → Environment, save (redeploys). The list shape (instead of an email-keyed dictionary) is required because **Render rejects env-var keys containing `@`**. To add additional reviewers, append a new pair of slots at the next index (`__2__`, `__3__`, …) to **both** services in `render.yaml`, commit + push, then set Email + Pin in Render UI. **Delete the slots from Render UI once review is approved** — long-lived fixed PINs are an audit liability.
+
+---
+
 ## 5. Authenticated baseline
 
 ### 5.1 `currentUser`

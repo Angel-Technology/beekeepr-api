@@ -365,20 +365,21 @@ public sealed class AuthService(
     }
 
     private static IReadOnlyDictionary<string, string> BuildReviewAccountPins(
-        IReadOnlyDictionary<string, string>? raw)
+        IReadOnlyList<ReviewAccount>? raw)
     {
         if (raw is null || raw.Count == 0)
             return new Dictionary<string, string>(StringComparer.Ordinal);
 
         // Pre-normalize keys so the per-request lookup matches what NormalizeEmail produces.
-        // Skip empty entries so an unset env var (which Configuration binds as "") can't
-        // accidentally match a user request whose email is also somehow empty.
+        // Skip empty entries so an unset env var slot (which Configuration binds as a
+        // ReviewAccount with empty strings) can't accidentally match a user request whose
+        // email is somehow also empty.
         var normalized = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var (email, pin) in raw)
+        foreach (var account in raw)
         {
-            if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(pin))
+            if (string.IsNullOrWhiteSpace(account.Email) || string.IsNullOrWhiteSpace(account.Pin))
                 continue;
-            normalized[email.Trim().ToLowerInvariant()] = pin.Trim();
+            normalized[account.Email.Trim().ToLowerInvariant()] = account.Pin.Trim();
         }
         return normalized;
     }

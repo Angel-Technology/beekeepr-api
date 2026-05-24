@@ -118,6 +118,51 @@ The HTML lives in the **Resend dashboard** (not in this repo). Our senders pass 
 
 Template IDs bind to `Email:SignInTemplateId` and `Email:WelcomeTemplateId` in `appsettings*.json` (non-secret).
 
+### App-store reviewer backdoor (`Auth:ReviewAccounts`)
+
+App-store reviewers (Apple, Google) can't receive our real Resend emails because they sign in from a corporate proxy that doesn't relay our outbound SMTP. To unblock them, we configure an email → fixed PIN map; when one of those emails hits `requestEmailSignIn`, the backend:
+
+1. Generates a verification token whose `TokenHash` is the SHA-256 of the configured PIN
+2. **Skips the Resend send entirely**
+3. Returns success on the GraphQL payload exactly like a normal request
+
+Verify-side is unchanged — the reviewer hits `verifyEmailSignIn` with their email + the same PIN we have configured, the existing hash check passes, and they sign in.
+
+**Config shape** (`AuthOptions.ReviewAccounts`, `BuzzKeepr.Application/Auth/AuthOptions.cs`) — an indexed list of `{ Email, Pin }` pairs:
+
+```jsonc
+"Auth": {
+  "ReviewAccounts": [
+    { "Email": "appstore-review@buzzkeepr.com",  "Pin": "12345" },
+    { "Email": "playstore-review@buzzkeepr.com", "Pin": "67890" }
+  ]
+}
+```
+
+**As env vars on Render** — bound through indexed slots:
+
+```
+Auth__ReviewAccounts__0__Email = appstore-review@buzzkeepr.com
+Auth__ReviewAccounts__0__Pin   = 12345
+Auth__ReviewAccounts__1__Email = playstore-review@buzzkeepr.com
+Auth__ReviewAccounts__1__Pin   = 67890
+```
+
+(Why the list shape instead of a dictionary keyed by email? **Render rejects `@` in env var keys.** Keying by email would force every reviewer email into the key name; the indexed `[i].Email` / `[i].Pin` form sidesteps that.)
+
+Both prod and develop services declare slots `__0__` and `__1__` in `render.yaml` with `sync: false`; the Email and Pin values are set per-service in the Render UI so they don't land in git.
+
+**Rules and gotchas:**
+
+- **Same expiry, same lockout as a real code.** 15-minute TTL, 5 wrong-attempt cap. Reviewers must verify within the window.
+- **Email is normalized.** Lookup is case-insensitive (we lowercase + trim both the configured key and the inbound email).
+- **PIN must match `verifyEmailSignIn` exactly.** Same character set as a regular code (we hash whatever they submit and compare). Stick to 5-digit numeric for parity with the normal flow.
+- **No bypass beyond the email send.** Sessions, identity verification, billing, and everything else behave identically to a normal user. The "backdoor" is only that we don't try to deliver the code via Resend.
+- **Remove after review approval.** Each entry is a static PIN — long-lived bypasses are an audit liability. Delete the env var(s) from Render UI once Apple / Google has approved the build.
+- **To add a new reviewer:** edit `render.yaml` to append a new pair of rows at the next index (both services), e.g. `- { key: Auth__ReviewAccounts__2__Email, sync: false }` and `- { key: Auth__ReviewAccounts__2__Pin, sync: false }`. Commit + push so the slots exist, then set Email + Pin in Render UI for whichever environments the reviewer needs. Indices must be consecutive starting from 0 — gaps stop binding.
+
+Implementation: `AuthService.cs:23-24` builds the normalized pin map at construction; `AuthService.RequestEmailSignInAsync` checks `isReviewAccount` before the Resend send and chooses the configured PIN vs. a random 5-digit code accordingly.
+
 ### Welcome email — name-gated, hybrid trigger
 
 The welcome only fires once we have a name to greet the user with. Otherwise the template renders "Welcome to BuzzKeepr, there." which we want to avoid.
