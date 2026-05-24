@@ -70,7 +70,7 @@ public sealed class AuthServiceTests
     [Fact]
     public async Task RequestEmailSignIn_ForReviewAccount_SkipsEmailSendButPersistsToken()
     {
-        authOptions.ReviewAccounts["apple-review@buzzkeepr.com"] = "424242";
+        authOptions.ReviewAccounts.Add(new ReviewAccount { Email = "apple-review@buzzkeepr.com", Pin = "424242" });
         sut = BuildSut();
 
         VerificationToken? captured = null;
@@ -98,7 +98,7 @@ public sealed class AuthServiceTests
     [Fact]
     public async Task RequestEmailSignIn_ForReviewAccount_VerifiesWithConfiguredPin()
     {
-        authOptions.ReviewAccounts["apple-review@buzzkeepr.com"] = "424242";
+        authOptions.ReviewAccounts.Add(new ReviewAccount { Email = "apple-review@buzzkeepr.com", Pin = "424242" });
         sut = BuildSut();
 
         VerificationToken? persisted = null;
@@ -130,7 +130,7 @@ public sealed class AuthServiceTests
     [Fact]
     public async Task RequestEmailSignIn_ForReviewAccount_IsCaseInsensitiveOnEmail()
     {
-        authOptions.ReviewAccounts["apple-review@buzzkeepr.com"] = "424242";
+        authOptions.ReviewAccounts.Add(new ReviewAccount { Email = "apple-review@buzzkeepr.com", Pin = "424242" });
         sut = BuildSut();
 
         var result = await sut.RequestEmailSignInAsync(
