@@ -8,7 +8,11 @@ public interface IUserRepository
 
     Task<User?> GetByIdForUpdateAsync(Guid id, CancellationToken cancellationToken);
 
+    Task<User?> GetByIdForUpdateIncludingDeletedAsync(Guid id, CancellationToken cancellationToken);
+
     Task<bool> EmailExistsAsync(string email, CancellationToken cancellationToken);
+
+    Task<bool> HandleExistsAsync(string handle, Guid? excludeUserId, CancellationToken cancellationToken);
 
     Task AddAsync(User user, CancellationToken cancellationToken);
 

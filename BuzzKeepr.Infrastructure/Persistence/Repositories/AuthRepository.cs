@@ -9,16 +9,22 @@ public sealed class AuthRepository(BuzzKeeprDbContext dbContext) : IAuthReposito
 {
     public async Task<User?> GetUserByEmailAsync(string email, CancellationToken cancellationToken)
     {
+        // IgnoreQueryFilters so users pending deletion can still sign in — AuthService treats
+        // a successful sign-in as account recovery and clears DeletedAtUtc.
         return await dbContext.Users
+            .IgnoreQueryFilters()
             .Include(user => user.ExternalAccounts)
             .FirstOrDefaultAsync(user => user.Email == email, cancellationToken);
     }
 
     public async Task<Session?> GetActiveSessionByTokenHashAsync(string tokenHash, DateTime nowUtc, CancellationToken cancellationToken)
     {
+        // IgnoreQueryFilters so existing sessions keep resolving their user during the 72-hour
+        // grace period — the client gets DeletedAtUtc on the user payload and can offer cancel.
         return await dbContext.Sessions
             .AsNoTracking()
             .Include(session => session.User)
+            .IgnoreQueryFilters()
             .FirstOrDefaultAsync(session => session.TokenHash == tokenHash
                 && session.RevokedAtUtc == null
                 && session.ExpiresAtUtc > nowUtc, cancellationToken);
@@ -58,7 +64,10 @@ public sealed class AuthRepository(BuzzKeeprDbContext dbContext) : IAuthReposito
         string providerAccountId,
         CancellationToken cancellationToken)
     {
+        // IgnoreQueryFilters so Google sign-in for a pending-deletion user resolves the
+        // navigation User; AuthService treats that as account recovery.
         return await dbContext.ExternalAccounts
+            .IgnoreQueryFilters()
             .Include(account => account.User)
             .FirstOrDefaultAsync(
                 account => account.Provider == provider && account.ProviderAccountId == providerAccountId,

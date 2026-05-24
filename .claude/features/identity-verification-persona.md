@@ -23,23 +23,16 @@ Persona runs OCR / face-match / liveness / watchlist
 
 Backend behavior at each stage:
 
-1. `startPersonaInquiry` (GraphQL mutation) — backend either creates a fresh inquiry on Persona (`inq_…`) or reuses an existing in-progress one if it's in a retryable state. **Subscription gate** fires here on the create-new-inquiry path — see below.
+1. `startPersonaInquiry` (GraphQL mutation) — backend either creates a fresh inquiry on Persona (`inq_…`) or reuses an existing in-progress one if it's in a retryable state. No subscription gate — any authenticated user can start an inquiry.
 2. Frontend opens the Persona SDK with the returned `inquiryId`. Backend has no involvement until the webhooks land.
 3. Persona POSTs to `/webhooks/persona` for each status transition. Backend verifies the HMAC signature, checks the event isn't stale (timestamp comparison), maps the status, and persists.
 4. On `Completed` or `Approved` (whichever lands first with verified data not yet present), backend reads the OCR'd fields **inline from the webhook payload** (`payload.data.attributes.fields`) and persists `verified_*` columns plus `persona_verified_at_utc`. No outbound API call to Persona.
 
-## Subscription gate
+## No subscription gate
 
-`startPersonaInquiry` is the **first paid surface in the funnel**. Before we'd burn a Persona inquiry call (fresh or retry), `IdentityVerificationService` calls `IBillingService.GetSubscriptionForUserAsync(userId)` and rejects with `subscriptionRequired: true` if `IsActive` is false.
+Persona inquiry creation used to be gated by an active subscription (the "first paid surface in the funnel"). That gate was removed — identity verification is now open to every authenticated user. The `subscriptionRequired` field and the `Active subscription required to start identity verification.` error string are gone from `StartPersonaInquiryResult` and the GraphQL `StartPersonaInquiryPayload`. `IdentityVerificationService` no longer takes `IBillingService` as a dependency.
 
-Rules:
-
-- **Fires on `shouldCreateNewInquiry == true`:** initial attempt OR retry after `Declined`/`Expired`/`Failed`. Both paths cost us a Persona call.
-- **Bypasses on existing in-progress inquiries:** if the user has an inquiry in `Created`/`Pending`/`Completed`/`Approved`/`NeedsReview`, they can keep fetching its status (free reuse path) even if their sub has lapsed mid-flow. They've already spent the inquiry; don't lock them out of seeing how it ended.
-- **REST fallback:** `GetSubscriptionForUserAsync` falls back to a live RevenueCat `GET /v1/subscribers/{appUserId}` when the local mirror says inactive — protects users who just paid but whose webhook hasn't landed yet.
-- **Conservative on RevenueCat outage:** if REST also fails or returns no entitlement, the gate blocks. Better to delay one user's KYC by a few minutes than let through unpaid runs.
-
-Frontend should branch on `subscriptionRequired` (typed boolean), not on the `error` string. When true, route to the paywall.
+If a subscription gate ever needs to come back, the place to put it is at the top of `IdentityVerificationService.StartPersonaInquiryAsync` immediately before the `personaClient.CreateInquiryAsync` call (only the create-new-inquiry path costs a Persona call; existing-inquiry reuse should stay free).
 
 ## Database tables
 
@@ -66,7 +59,7 @@ Everything lives directly on `users`. Migrations:
 
 | Operation | Type | Input | Output | Auth required |
 | --------- | ---- | ----- | ------ | ------------- |
-| `startPersonaInquiry` | mutation | (uses session) | `inquiry_id`, `identity_verification_status`, `persona_inquiry_status`, `created_new_inquiry`, `subscription_required` | yes |
+| `startPersonaInquiry` | mutation | (uses session) | `inquiry_id`, `identity_verification_status`, `persona_inquiry_status`, `created_new_inquiry` | yes |
 | `currentUser` | query | (uses session) | includes identity-verification status fields + verified-data fields | yes |
 
 ## REST surface (webhooks)

@@ -3,6 +3,7 @@ using System;
 using BuzzKeepr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace BuzzKeepr.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(BuzzKeeprDbContext))]
-    partial class BuzzKeeprDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260523032521_AddUserNicknameAndHandle")]
+    partial class AddUserNicknameAndHandle
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -138,9 +141,6 @@ namespace BuzzKeepr.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<DateTime?>("DeletedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
                     b.Property<string>("DisplayName")
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
@@ -154,8 +154,8 @@ namespace BuzzKeepr.Infrastructure.Persistence.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<string>("Handle")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
+                        .HasMaxLength(21)
+                        .HasColumnType("character varying(21)");
 
                     b.Property<string>("IdentityVerificationStatus")
                         .IsRequired()

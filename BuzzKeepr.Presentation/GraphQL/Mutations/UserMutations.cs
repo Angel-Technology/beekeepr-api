@@ -7,6 +7,7 @@ using BuzzKeepr.API.GraphQL.Inputs;
 using ApplicationRequestEmailSignInInput = BuzzKeepr.Application.Auth.Models.RequestEmailSignInInput;
 using ApplicationSignInWithGoogleInput = BuzzKeepr.Application.Auth.Models.SignInWithGoogleInput;
 using ApplicationCreateUserInput = BuzzKeepr.Application.Users.Models.CreateUserInput;
+using ApplicationUpdateProfileInput = BuzzKeepr.Application.Users.Models.UpdateProfileInput;
 using ApplicationVerifyEmailSignInInput = BuzzKeepr.Application.Auth.Models.VerifyEmailSignInInput;
 
 namespace BuzzKeepr.API.GraphQL.Mutations;
@@ -271,6 +272,143 @@ public sealed class UserMutations
         };
     }
 
+    public async Task<UpdateProfilePayload> UpdateProfileAsync(
+        UpdateProfileInput input,
+        [Service] IAuthService authService,
+        [Service] IUserService userService,
+        [Service] IHttpContextAccessor httpContextAccessor,
+        CancellationToken cancellationToken)
+    {
+        var httpContext = httpContextAccessor.HttpContext
+            ?? throw new InvalidOperationException("HTTP context is required for profile updates.");
+
+        var currentUser = await SessionRefresher.ResolveAsync(httpContext, authService, cancellationToken);
+
+        if (currentUser.User is null)
+        {
+            return new UpdateProfilePayload
+            {
+                Error = "Authentication is required."
+            };
+        }
+
+        var result = await userService.UpdateProfileAsync(
+            currentUser.User.Id,
+            new ApplicationUpdateProfileInput
+            {
+                Nickname = input.Nickname,
+                Handle = input.Handle
+            },
+            cancellationToken);
+
+        if (result.NicknameTooLong)
+        {
+            return new UpdateProfilePayload
+            {
+                Error = "Nickname must be 50 characters or fewer."
+            };
+        }
+
+        if (result.HandleInvalid)
+        {
+            return new UpdateProfilePayload
+            {
+                Error = "Handle must be 3-20 letters, numbers, or underscores."
+            };
+        }
+
+        if (result.HandleAlreadyTaken)
+        {
+            return new UpdateProfilePayload
+            {
+                Error = "That handle is already taken."
+            };
+        }
+
+        if (result.UserNotFound || !result.Success || result.User is null)
+        {
+            return new UpdateProfilePayload
+            {
+                Error = "Unable to update profile."
+            };
+        }
+
+        return new UpdateProfilePayload
+        {
+            User = UserGraph.From(result.User)
+        };
+    }
+
+    public async Task<RequestAccountDeletionPayload> RequestAccountDeletionAsync(
+        [Service] IAuthService authService,
+        [Service] IUserService userService,
+        [Service] IHttpContextAccessor httpContextAccessor,
+        CancellationToken cancellationToken)
+    {
+        var httpContext = httpContextAccessor.HttpContext
+            ?? throw new InvalidOperationException("HTTP context is required for account deletion.");
+
+        var currentUser = await SessionRefresher.ResolveAsync(httpContext, authService, cancellationToken);
+
+        if (currentUser.User is null)
+        {
+            return new RequestAccountDeletionPayload
+            {
+                Error = "Authentication is required."
+            };
+        }
+
+        var result = await userService.RequestAccountDeletionAsync(currentUser.User.Id, cancellationToken);
+
+        if (result.UserNotFound || !result.Success || result.User is null)
+        {
+            return new RequestAccountDeletionPayload
+            {
+                Error = "Unable to request account deletion."
+            };
+        }
+
+        return new RequestAccountDeletionPayload
+        {
+            User = UserGraph.From(result.User)
+        };
+    }
+
+    public async Task<CancelAccountDeletionPayload> CancelAccountDeletionAsync(
+        [Service] IAuthService authService,
+        [Service] IUserService userService,
+        [Service] IHttpContextAccessor httpContextAccessor,
+        CancellationToken cancellationToken)
+    {
+        var httpContext = httpContextAccessor.HttpContext
+            ?? throw new InvalidOperationException("HTTP context is required for cancelling account deletion.");
+
+        var currentUser = await SessionRefresher.ResolveAsync(httpContext, authService, cancellationToken);
+
+        if (currentUser.User is null)
+        {
+            return new CancelAccountDeletionPayload
+            {
+                Error = "Authentication is required."
+            };
+        }
+
+        var result = await userService.CancelAccountDeletionAsync(currentUser.User.Id, cancellationToken);
+
+        if (result.UserNotFound || !result.Success || result.User is null)
+        {
+            return new CancelAccountDeletionPayload
+            {
+                Error = "Unable to cancel account deletion."
+            };
+        }
+
+        return new CancelAccountDeletionPayload
+        {
+            User = UserGraph.From(result.User)
+        };
+    }
+
     public async Task<StartPersonaInquiryPayload> StartPersonaInquiryAsync(
         [Service] IAuthService authService,
         [Service] IIdentityVerificationService identityVerificationService,
@@ -302,7 +440,6 @@ public sealed class UserMutations
             SessionToken = result.SessionToken,
             IdentityVerificationStatus = result.IdentityVerificationStatus,
             PersonaInquiryStatus = result.PersonaInquiryStatus,
-            SubscriptionRequired = result.SubscriptionRequired,
             Error = result.Error
         };
     }

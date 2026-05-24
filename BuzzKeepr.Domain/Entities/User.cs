@@ -10,6 +10,10 @@ public sealed class User
 
     public string? DisplayName { get; set; }
 
+    public string? Nickname { get; set; }
+
+    public string? Handle { get; set; }
+
     public string? ImageUrl { get; set; }
 
     public bool EmailVerified { get; set; }
@@ -69,6 +73,8 @@ public sealed class User
     public string? RevenueCatAppUserId { get; set; }
 
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+
+    public DateTime? DeletedAtUtc { get; set; }
 
     public ICollection<ExternalAccount> ExternalAccounts { get; set; } = new List<ExternalAccount>();
 

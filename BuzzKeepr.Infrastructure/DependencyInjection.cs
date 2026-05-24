@@ -1,3 +1,4 @@
+using BuzzKeepr.Application.Auth;
 using BuzzKeepr.Infrastructure.Auth;
 using BuzzKeepr.Infrastructure.Billing;
 using BuzzKeepr.Infrastructure.Configuration;
@@ -32,6 +33,8 @@ public static class DependencyInjection
             configuration.GetSection(DatabaseOptions.SectionName));
         services.Configure<EmailDeliveryOptions>(
             configuration.GetSection(EmailDeliveryOptions.SectionName));
+        services.Configure<AuthOptions>(
+            configuration.GetSection(AuthOptions.SectionName));
         services.Configure<GoogleAuthOptions>(
             configuration.GetSection(GoogleAuthOptions.SectionName));
         services.Configure<PersonaOptions>(
@@ -115,6 +118,7 @@ public static class DependencyInjection
         services.AddHostedService<Auth.SessionCleanupBackgroundService>();
         services.AddHostedService<Auth.WelcomeEmailSweeperBackgroundService>();
         services.AddHostedService<IdentityVerification.BackgroundCheckRenewalBackgroundService>();
+        services.AddHostedService<Users.AccountDeletionPurgeBackgroundService>();
 
         return services;
     }

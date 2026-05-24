@@ -11,6 +11,8 @@ public sealed class UserGraph
         Id = user.Id,
         Email = user.Email,
         DisplayName = user.DisplayName,
+        Nickname = user.Nickname,
+        Handle = user.Handle,
         ImageUrl = user.ImageUrl,
         EmailVerified = user.EmailVerified,
         IdentityVerificationStatus = user.IdentityVerificationStatus,
@@ -27,7 +29,8 @@ public sealed class UserGraph
         BackgroundCheckBadgeExpiresAtUtc = user.BackgroundCheckBadgeExpiresAtUtc,
         TermsAcceptedAtUtc = user.TermsAcceptedAtUtc,
         Subscription = user.Subscription,
-        CreatedAtUtc = user.CreatedAtUtc
+        CreatedAtUtc = user.CreatedAtUtc,
+        DeletedAtUtc = user.DeletedAtUtc
     };
 
     public Guid Id { get; init; }
@@ -35,6 +38,10 @@ public sealed class UserGraph
     public string Email { get; init; } = string.Empty;
 
     public string? DisplayName { get; init; }
+
+    public string? Nickname { get; init; }
+
+    public string? Handle { get; init; }
 
     public string? ImageUrl { get; init; }
 
@@ -69,4 +76,6 @@ public sealed class UserGraph
     public SubscriptionDto Subscription { get; init; } = new();
 
     public DateTime CreatedAtUtc { get; init; }
+
+    public DateTime? DeletedAtUtc { get; init; }
 }

@@ -227,55 +227,37 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task StartPersonaInquiry_WithoutActiveSubscription_BlocksAndReturnsSubscriptionRequired()
+    public async Task StartPersonaInquiry_WithoutActiveSubscription_CreatesInquiry()
     {
-        var (token, _, _) = await SignInAsync(withActiveSubscription: false);
-        var http = factory.CreateClient();
-        http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
-        var graphql = new GraphQLClient(http);
-
-        var response = await graphql.SendAsync<StartInquiryData>(
-            "mutation { startPersonaInquiry { success createdNewInquiry inquiryId error subscriptionRequired } }");
-
-        var payload = response.RequireData().StartPersonaInquiry;
-        Assert.False(payload.Success);
-        Assert.True(payload.SubscriptionRequired);
-        Assert.Equal("Active subscription required to start identity verification.", payload.Error);
-        Assert.Empty(factory.FakePersona.CreateInquiryCalls);
-    }
-
-    [Fact]
-    public async Task StartPersonaInquiry_WithActiveSubscription_CreatesInquiry()
-    {
+        // Subscription is no longer required for identity verification — any authenticated user
+        // can start a Persona inquiry.
         factory.FakePersona.NextCreateInquiryResult = new CreatePersonaInquiryResult
         {
             Success = true,
-            InquiryId = "inq_gated_pass",
+            InquiryId = "inq_no_sub",
             InquiryStatus = "created"
         };
 
-        var (token, _, _) = await SignInAsync(); // default: subscription seeded as active
+        var (token, _, _) = await SignInAsync();
         var http = factory.CreateClient();
         http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
         var graphql = new GraphQLClient(http);
 
         var response = await graphql.SendAsync<StartInquiryData>(
-            "mutation { startPersonaInquiry { success createdNewInquiry inquiryId error subscriptionRequired } }");
+            "mutation { startPersonaInquiry { success createdNewInquiry inquiryId error } }");
 
         var payload = response.RequireData().StartPersonaInquiry;
         Assert.True(payload.Success);
-        Assert.False(payload.SubscriptionRequired);
         Assert.Null(payload.Error);
-        Assert.Equal("inq_gated_pass", payload.InquiryId);
+        Assert.Equal("inq_no_sub", payload.InquiryId);
         Assert.Single(factory.FakePersona.CreateInquiryCalls);
     }
 
     [Fact]
-    public async Task StartPersonaInquiry_ReuseExistingInquiry_BypassesSubscriptionGate()
+    public async Task StartPersonaInquiry_ReuseExistingInquiry_DoesNotCallPersonaAgain()
     {
-        // Seed a user who already has a Persona inquiry in a non-retryable state. Even with no
-        // subscription, they should be able to fetch the existing inquiry's status — we only gate
-        // the path that would actually create a new (paid) inquiry.
+        // Once an inquiry is in a non-retryable state, subsequent calls should fetch the existing
+        // inquiry's status rather than creating a fresh (billable) one.
         factory.FakePersona.NextCreateInquiryResult = new CreatePersonaInquiryResult
         {
             Success = true,
@@ -283,7 +265,7 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
             InquiryStatus = "pending"
         };
 
-        var (token, userId, _) = await SignInAsync(); // start with active sub so we can create
+        var (token, _, _) = await SignInAsync();
         var http = factory.CreateClient();
         http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
         var graphql = new GraphQLClient(http);
@@ -292,32 +274,21 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
             "mutation { startPersonaInquiry { success } }");
         Assert.Single(factory.FakePersona.CreateInquiryCalls);
 
-        // Now lapse the subscription. The existing inquiry should still be reachable.
-        await using (var scope = factory.Services.CreateAsyncScope())
-        {
-            var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
-            await dbContext.Users
-                .Where(u => u.Id == userId)
-                .ExecuteUpdateAsync(setters => setters
-                    .SetProperty(u => u.SubscriptionStatus, SubscriptionStatus.Expired));
-        }
-
         var reuse = await graphql.SendAsync<StartInquiryData>(
-            "mutation { startPersonaInquiry { success createdNewInquiry inquiryId subscriptionRequired error } }");
+            "mutation { startPersonaInquiry { success createdNewInquiry inquiryId error } }");
 
         var payload = reuse.RequireData().StartPersonaInquiry;
         Assert.True(payload.Success);
         Assert.False(payload.CreatedNewInquiry);
-        Assert.False(payload.SubscriptionRequired);
         Assert.Equal("inq_existing", payload.InquiryId);
         Assert.Single(factory.FakePersona.CreateInquiryCalls); // no second call
     }
 
     [Fact]
-    public async Task StartPersonaInquiry_RetryAfterFailedInquiry_RequiresActiveSubscription()
+    public async Task StartPersonaInquiry_RetryAfterFailedInquiry_CreatesNewInquiry()
     {
-        // Seed a user with a Failed inquiry (retryable status) and no active sub. A retry attempt
-        // would burn a fresh Persona call, so the gate fires.
+        // Failed/Declined/Expired are retryable. The retry path used to require an active
+        // subscription; that gate is gone, so the retry should succeed for any authenticated user.
         factory.FakePersona.NextCreateInquiryResult = new CreatePersonaInquiryResult
         {
             Success = true,
@@ -333,24 +304,30 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
         await graphql.SendAsync<StartInquiryData>(
             "mutation { startPersonaInquiry { success } }");
 
-        // Mark the inquiry as Failed and lapse the subscription.
         await using (var scope = factory.Services.CreateAsyncScope())
         {
             var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
             await dbContext.Users
                 .Where(u => u.Id == userId)
                 .ExecuteUpdateAsync(setters => setters
-                    .SetProperty(u => u.IdentityVerificationStatus, IdentityVerificationStatus.Failed)
-                    .SetProperty(u => u.SubscriptionStatus, SubscriptionStatus.Expired));
+                    .SetProperty(u => u.IdentityVerificationStatus, IdentityVerificationStatus.Failed));
         }
 
+        factory.FakePersona.NextCreateInquiryResult = new CreatePersonaInquiryResult
+        {
+            Success = true,
+            InquiryId = "inq_retry",
+            InquiryStatus = "created"
+        };
+
         var retry = await graphql.SendAsync<StartInquiryData>(
-            "mutation { startPersonaInquiry { success createdNewInquiry inquiryId subscriptionRequired error } }");
+            "mutation { startPersonaInquiry { success createdNewInquiry inquiryId error } }");
 
         var payload = retry.RequireData().StartPersonaInquiry;
-        Assert.False(payload.Success);
-        Assert.True(payload.SubscriptionRequired);
-        Assert.Single(factory.FakePersona.CreateInquiryCalls); // no second Persona call attempted
+        Assert.True(payload.Success);
+        Assert.True(payload.CreatedNewInquiry);
+        Assert.Equal("inq_retry", payload.InquiryId);
+        Assert.Equal(2, factory.FakePersona.CreateInquiryCalls.Count);
     }
 
     [Fact]
@@ -670,7 +647,7 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
         return $"t={timestamp},v1={hex}";
     }
 
-    private async Task<(string Token, Guid UserId, string Email)> SignInAsync(bool withActiveSubscription = true)
+    private async Task<(string Token, Guid UserId, string Email)> SignInAsync()
     {
         var email = $"persona-{Guid.NewGuid():N}@buzzkeepr.test";
         var http = factory.CreateClient();
@@ -685,29 +662,11 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
             new { input = new { email, code } });
         var data = verify.RequireData().VerifyEmailSignIn;
 
-        if (withActiveSubscription)
-            await SeedActiveSubscriptionAsync(data.User!.Id);
-
         return (data.Session!.Token, data.User!.Id, email);
     }
 
-    private async Task SeedActiveSubscriptionAsync(Guid userId)
-    {
-        await using var scope = factory.Services.CreateAsyncScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
-        await dbContext.Users
-            .Where(u => u.Id == userId)
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(u => u.SubscriptionStatus, SubscriptionStatus.Trialing)
-                .SetProperty(u => u.SubscriptionEntitlement, "premium")
-                .SetProperty(u => u.SubscriptionProductId, "premium_monthly")
-                .SetProperty(u => u.SubscriptionStore, (SubscriptionStore?)SubscriptionStore.AppStore)
-                .SetProperty(u => u.SubscriptionCurrentPeriodEndUtc, (DateTime?)DateTime.UtcNow.AddDays(7))
-                .SetProperty(u => u.SubscriptionWillRenew, (bool?)true));
-    }
-
     private sealed record StartInquiryData(StartInquiryPayload StartPersonaInquiry);
-    private sealed record StartInquiryPayload(bool Success, bool CreatedNewInquiry, string? InquiryId, string? Error, bool SubscriptionRequired);
+    private sealed record StartInquiryPayload(bool Success, bool CreatedNewInquiry, string? InquiryId, string? Error);
 
     private sealed record VerifyData(VerifyPayload VerifyEmailSignIn);
     private sealed record VerifyPayload(VerifyUser? User, VerifySession? Session);

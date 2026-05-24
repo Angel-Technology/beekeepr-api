@@ -1,5 +1,4 @@
 using System.Text.Json;
-using BuzzKeepr.Application.Billing;
 using BuzzKeepr.Application.IdentityVerification.Models;
 using BuzzKeepr.Application.Users;
 using BuzzKeepr.Domain.Enums;
@@ -12,7 +11,6 @@ public sealed class IdentityVerificationService(
     IPersonaClient personaClient,
     ICheckrTrustClient checkrTrustClient,
     IWelcomeEmailSender welcomeEmailSender,
-    IBillingService billingService,
     ILogger<IdentityVerificationService> logger) : IIdentityVerificationService
 {
     private static readonly HashSet<IdentityVerificationStatus> RetryableStatuses =
@@ -34,9 +32,8 @@ public sealed class IdentityVerificationService(
 
     // Calendar months, not a fixed TimeSpan, because "3 months" reads naturally on a profile
     // ("Verified through Oct 2026") and we use DateTime.AddMonths to handle month-length variance.
-    // For active subscribers, BackgroundCheckRenewalBackgroundService re-runs the check every cycle
-    // so the badge stays fresh without user action. For lapsed subscribers, the badge timestamp is
-    // simply past now() and the frontend treats it as expired.
+    // BackgroundCheckRenewalBackgroundService re-runs the check every cycle so the badge stays
+    // fresh without user action.
     private const int BackgroundCheckBadgeValidMonths = 3;
 
     public async Task<StartPersonaInquiryResult> StartPersonaInquiryAsync(Guid userId, CancellationToken cancellationToken)
@@ -119,27 +116,6 @@ public sealed class IdentityVerificationService(
                 CreatedNewInquiry = false,
                 InquiryId = user.PersonaInquiryId,
                 SessionToken = reusedSessionTokenResult.SessionToken,
-                IdentityVerificationStatus = user.IdentityVerificationStatus,
-                PersonaInquiryStatus = user.PersonaInquiryStatus
-            };
-        }
-
-        // Subscription gate. Only fires when we'd create a new inquiry (initial attempt or
-        // a retry after Failed/Declined/Expired) — both paths burn a paid Persona call. Reusing
-        // an existing inquiry is free and stays accessible even if the user's sub has lapsed.
-        // GetSubscriptionForUserAsync includes the RevenueCat REST fallback, so a freshly-paid
-        // user whose webhook hasn't landed isn't blocked at the door.
-        var subscription = await billingService.GetSubscriptionForUserAsync(user.Id, cancellationToken);
-        if (!subscription.IsActive)
-        {
-            logger.LogInformation(
-                "Blocking Persona inquiry creation for user {UserId}: no active subscription.",
-                user.Id);
-
-            return new StartPersonaInquiryResult
-            {
-                SubscriptionRequired = true,
-                Error = "Active subscription required to start identity verification.",
                 IdentityVerificationStatus = user.IdentityVerificationStatus,
                 PersonaInquiryStatus = user.PersonaInquiryStatus
             };
