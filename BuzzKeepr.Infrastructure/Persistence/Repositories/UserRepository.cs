@@ -79,6 +79,7 @@ public sealed class UserRepository(BuzzKeeprDbContext dbContext) : IUserReposito
                 DisplayName = user.DisplayName,
                 ImageUrl = user.ImageUrl,
                 BackgroundCheckBadge = user.BackgroundCheckBadge,
+                CreatedAtUtc = user.CreatedAtUtc,
             });
     }
 

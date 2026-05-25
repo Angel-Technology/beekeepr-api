@@ -17,4 +17,6 @@ public sealed class UserSearchResultDto
     public string? ImageUrl { get; init; }
 
     public BackgroundCheckBadge BackgroundCheckBadge { get; init; } = BackgroundCheckBadge.None;
+
+    public DateTime CreatedAtUtc { get; init; }
 }
