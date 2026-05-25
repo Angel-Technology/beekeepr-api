@@ -1,3 +1,4 @@
+using BuzzKeepr.Application.Users.Models;
 using BuzzKeepr.Domain.Entities;
 
 namespace BuzzKeepr.Application.Users;
@@ -13,6 +14,10 @@ public interface IUserRepository
     Task<bool> EmailExistsAsync(string email, CancellationToken cancellationToken);
 
     Task<bool> HandleExistsAsync(string handle, Guid? excludeUserId, CancellationToken cancellationToken);
+
+    // Returns an IQueryable so HotChocolate's [UsePaging] middleware can push skip/take into SQL.
+    // `normalizedQuery` must already be trimmed + lower-cased; the repo does not normalize it.
+    IQueryable<UserSearchResultDto> Search(string normalizedQuery, Guid? excludeUserId);
 
     Task AddAsync(User user, CancellationToken cancellationToken);
 
