@@ -18,7 +18,11 @@ public sealed class UserService(
     // that would behave like a full enumeration of the user table.
     private const int SearchMinQueryLength = 2;
 
-    private static readonly Regex HandleFormat = new("^[a-zA-Z0-9_]{3,20}$", RegexOptions.Compiled);
+    private const int HandleMinLength = 3;
+    private const int HandleMaxLength = 20;
+
+    private static readonly Regex HandleFormat = new($"^[a-zA-Z0-9_]{{{HandleMinLength},{HandleMaxLength}}}$", RegexOptions.Compiled);
+    private static readonly Regex HandleAllowedChars = new("^[a-zA-Z0-9_]+$", RegexOptions.Compiled);
 
 
     public async Task<UserDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
@@ -206,6 +210,30 @@ public sealed class UserService(
             Success = true,
             User = MapUser(user)
         };
+    }
+
+    public async Task<HandleAvailabilityResult> CheckHandleAvailabilityAsync(
+        string handle,
+        Guid currentUserId,
+        CancellationToken cancellationToken)
+    {
+        var normalized = (handle ?? string.Empty).Trim().ToLowerInvariant();
+
+        if (normalized.Length < HandleMinLength)
+            return HandleAvailabilityResult.Unavailable(HandleAvailabilityReasons.TooShort);
+
+        if (normalized.Length > HandleMaxLength)
+            return HandleAvailabilityResult.Unavailable(HandleAvailabilityReasons.TooLong);
+
+        if (!HandleAllowedChars.IsMatch(normalized))
+            return HandleAvailabilityResult.Unavailable(HandleAvailabilityReasons.InvalidFormat);
+
+        // Pass currentUserId so the caller's own current handle is reported as available,
+        // not "taken" — matches the behavior of UpdateProfileAsync's uniqueness check.
+        if (await userRepository.HandleExistsAsync(normalized, currentUserId, cancellationToken))
+            return HandleAvailabilityResult.Unavailable(HandleAvailabilityReasons.Taken);
+
+        return HandleAvailabilityResult.Ok();
     }
 
     public IQueryable<UserSearchResultDto> SearchUsers(string query, Guid? excludeUserId)
