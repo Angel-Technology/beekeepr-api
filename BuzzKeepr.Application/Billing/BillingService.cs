@@ -161,8 +161,32 @@ public sealed class BillingService(
                 break;
 
             case "NON_RENEWING_PURCHASE":
-                // One-time consumable (e.g. an extra background-check credit). Doesn't change
-                // the recurring-subscription mirror; frontend handles consumption via RevenueCat.
+                // RevenueCat fires this for two very different things:
+                //   1. Promotional grants we made via /entitlements/{id}/promotional — store and
+                //      period_type both come back as PROMOTIONAL, with a real expiration_at_ms.
+                //      We need to mirror these as Active so server-side `subscription.isActive`
+                //      reads true. An EXPIRATION event will follow when the promo period ends.
+                //   2. True one-time consumables (e.g. a future "buy an extra background-check
+                //      credit" SKU) — store != PROMOTIONAL. These shouldn't move the recurring
+                //      subscription mirror at all; the frontend handles consumption via the SDK.
+                if (evt.Store == SubscriptionStore.Promotional)
+                {
+                    // Don't downgrade a user who's already entitled (rare: user with paid sub
+                    // also redeems a promo). Only flip the status if they aren't currently
+                    // active, and only extend the period_end forward — never shorten.
+                    if (!Models.SubscriptionDto.IsLocallyActive(user))
+                    {
+                        user.SubscriptionStatus = SubscriptionStatus.Active;
+                        user.SubscriptionWillRenew = false;
+                    }
+
+                    if (evt.ExpirationUtc is { } promoExpiry
+                        && (user.SubscriptionCurrentPeriodEndUtc is null
+                            || promoExpiry > user.SubscriptionCurrentPeriodEndUtc.Value))
+                    {
+                        user.SubscriptionCurrentPeriodEndUtc = promoExpiry;
+                    }
+                }
                 break;
 
             case "TRANSFER":

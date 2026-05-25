@@ -8,6 +8,7 @@ public static class DependencyInjection
     {
         services.AddScoped<Auth.IAuthService, Auth.AuthService>();
         services.AddScoped<Billing.IBillingService, Billing.BillingService>();
+        services.AddScoped<Billing.IPromoCodeService, Billing.PromoCodeService>();
         services.AddScoped<IdentityVerification.IIdentityVerificationService, IdentityVerification.IdentityVerificationService>();
         services.AddScoped<Users.IUserService, Users.UserService>();
 
