@@ -14,6 +14,10 @@ public sealed class UserService(
 {
     private const int NicknameMaxLength = 50;
 
+    // Two chars is enough for prefix lookups (e.g. "sa") while still blocking single-char queries
+    // that would behave like a full enumeration of the user table.
+    private const int SearchMinQueryLength = 2;
+
     private static readonly Regex HandleFormat = new("^[a-zA-Z0-9_]{3,20}$", RegexOptions.Compiled);
 
 
@@ -202,6 +206,20 @@ public sealed class UserService(
             Success = true,
             User = MapUser(user)
         };
+    }
+
+    public IQueryable<UserSearchResultDto> SearchUsers(string query, Guid? excludeUserId)
+    {
+        var normalized = (query ?? string.Empty).Trim().ToLowerInvariant();
+
+        // Short queries would match nearly every row through the trigram OR-branch; return empty
+        // rather than letting it hit the DB.
+        if (normalized.Length < SearchMinQueryLength)
+        {
+            return Enumerable.Empty<UserSearchResultDto>().AsQueryable();
+        }
+
+        return userRepository.Search(normalized, excludeUserId);
     }
 
     public async Task<CancelAccountDeletionResult> CancelAccountDeletionAsync(

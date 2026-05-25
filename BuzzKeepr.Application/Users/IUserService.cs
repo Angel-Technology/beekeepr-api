@@ -15,4 +15,8 @@ public interface IUserService
     Task<RequestAccountDeletionResult> RequestAccountDeletionAsync(Guid userId, CancellationToken cancellationToken);
 
     Task<CancelAccountDeletionResult> CancelAccountDeletionAsync(Guid userId, CancellationToken cancellationToken);
+
+    // Returns an unmaterialized IQueryable; the caller (GraphQL resolver) applies cursor pagination
+    // via [UsePaging], so we let LIMIT/OFFSET land in SQL instead of pulling rows into memory.
+    IQueryable<UserSearchResultDto> SearchUsers(string query, Guid? excludeUserId);
 }
