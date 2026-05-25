@@ -64,4 +64,21 @@ public sealed class UserQueries
 
         return userService.SearchUsers(query, current.User.Id);
     }
+
+    public async Task<HandleAvailabilityResult> CheckHandleAvailabilityAsync(
+        string handle,
+        [Service] IAuthService authService,
+        [Service] IUserService userService,
+        [Service] IHttpContextAccessor httpContextAccessor,
+        CancellationToken cancellationToken)
+    {
+        var httpContext = httpContextAccessor.HttpContext
+            ?? throw new InvalidOperationException("HTTP context is required for checkHandleAvailability.");
+
+        var current = await SessionRefresher.ResolveAsync(httpContext, authService, cancellationToken);
+        if (current.User is null)
+            return HandleAvailabilityResult.Unavailable(HandleAvailabilityReasons.AuthenticationRequired);
+
+        return await userService.CheckHandleAvailabilityAsync(handle, current.User.Id, cancellationToken);
+    }
 }
