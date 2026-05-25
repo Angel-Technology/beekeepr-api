@@ -86,7 +86,8 @@ builder.Services
     })
     .AddDiagnosticEventListener<BuzzKeepr.API.GraphQL.SentryGraphQLDiagnosticListener>()
     .AddQueryType<UserQueries>()
-    .AddMutationType<UserMutations>();
+    .AddMutationType<UserMutations>()
+    .AddTypeExtension<BillingMutations>();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>

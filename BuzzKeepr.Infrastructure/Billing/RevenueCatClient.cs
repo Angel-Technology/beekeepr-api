@@ -1,4 +1,5 @@
 using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 using BuzzKeepr.Application.Billing;
 using BuzzKeepr.Application.Billing.Models;
@@ -15,6 +16,61 @@ public sealed class RevenueCatClient(
     ILogger<RevenueCatClient> logger) : IRevenueCatClient
 {
     private readonly RevenueCatOptions options = revenueCatOptions.Value;
+
+    public async Task<bool> GrantPromotionalEntitlementAsync(
+        string appUserId,
+        string entitlementId,
+        PromoCodeDuration duration,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(options.SecretApiKey)
+            || string.IsNullOrWhiteSpace(appUserId)
+            || string.IsNullOrWhiteSpace(entitlementId))
+        {
+            return false;
+        }
+
+        try
+        {
+            // Escape both path segments — the entitlement identifier configured in this account
+            // contains a space ("Buzzkeepr Pro"), which must be percent-encoded in the URL.
+            var requestUri = new Uri(
+                new Uri(options.ApiBaseUrl),
+                $"/v1/subscribers/{Uri.EscapeDataString(appUserId)}/entitlements/{Uri.EscapeDataString(entitlementId)}/promotional");
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, requestUri);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.SecretApiKey);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            request.Content = new StringContent(
+                JsonSerializer.Serialize(new { duration = duration.ToRevenueCatDuration() }),
+                Encoding.UTF8,
+                "application/json");
+
+            using var response = await httpClient.SendAsync(request, cancellationToken);
+
+            if (response.IsSuccessStatusCode)
+                return true;
+
+            var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            logger.LogWarning(
+                "RevenueCat POST /v1/subscribers/{AppUserId}/entitlements/{Entitlement}/promotional failed with {StatusCode}: {Body}",
+                appUserId,
+                entitlementId,
+                (int)response.StatusCode,
+                errorBody);
+
+            return false;
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(
+                exception,
+                "RevenueCat promotional grant for {AppUserId} entitlement {Entitlement} threw.",
+                appUserId,
+                entitlementId);
+            return false;
+        }
+    }
 
     public async Task<RevenueCatSubscriberSnapshot?> GetSubscriberAsync(string appUserId, CancellationToken cancellationToken)
     {

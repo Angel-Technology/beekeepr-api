@@ -12,6 +12,7 @@ Read [`../architectural-patterns.md`](../architectural-patterns.md) first for th
 | Identity verification — Persona (KYC) | Complete | [identity-verification-persona.md](identity-verification-persona.md) |
 | Identity verification — Checkr Trust (instant criminal) | Complete | [identity-verification-checkr.md](identity-verification-checkr.md) |
 | Billing & subscriptions (RevenueCat) | In-flight (no paid surface gated yet) | [billing-subscriptions.md](billing-subscriptions.md) |
+| Promo codes (RevenueCat promotional entitlements) | Complete | [promo-codes.md](promo-codes.md) |
 
 ## Adding a new feature doc
 

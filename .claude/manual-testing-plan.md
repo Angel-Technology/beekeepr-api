@@ -1018,7 +1018,6 @@ TRUNCATE "Users" CASCADE;
 ```
 
 ---
-
 ## 20. Coverage map
 
 Once you've worked through phases 4–18, the following are end-to-end-verified against a real running stack:

@@ -50,7 +50,7 @@ Indexed: `revenuecat_app_user_id` is unique.
 
 `isActive` is the convenience field: it's `true` iff `status` is anything other than `None` / `Expired` AND `currentPeriodEndUtc` is in the future. Frontend should branch on this rather than reimplementing the rule.
 
-There is no mutation surface — purchases happen entirely through the RevenueCat SDK on the frontend.
+There is no mutation surface for purchases themselves — those happen entirely through the RevenueCat SDK on the frontend. The one billing-adjacent mutation we own is `redeemPromoCode`, which grants a promotional entitlement via RevenueCat's REST API; that flow lives in its own feature doc — see [promo-codes.md](promo-codes.md).
 
 ## REST surface (webhooks)
 
@@ -78,7 +78,8 @@ We map RevenueCat event types to status transitions. Unknown event types are log
 | `CANCELLATION` | `Cancelled` | **Period is still paid through.** `is_active` stays true until `current_period_end_utc`. `will_renew` flips to false. |
 | `BILLING_ISSUE` | `InGracePeriod` | Card declined; RevenueCat retries. |
 | `EXPIRATION` | `Expired` | Access actually ended. |
-| `NON_RENEWING_PURCHASE` | (no change) | One-time consumable; not a subscription event. Reserved for future "extra background-check credit" SKU. |
+| `NON_RENEWING_PURCHASE` (store=`PROMOTIONAL`) | `Active` | Promotional grant we made via the REST API — see [promo-codes.md](promo-codes.md). Sets `current_period_end_utc` to the promo expiry (forward-only — won't shorten an existing longer period for a user who already has a paid sub). `will_renew` set to false. An `EXPIRATION` event will follow when the promo period ends. |
+| `NON_RENEWING_PURCHASE` (store ≠ `PROMOTIONAL`) | (no change) | True one-time consumable; not a subscription event. Reserved for future "extra background-check credit" SKU — frontend handles consumption via the SDK. |
 | `TRANSFER` / `SUBSCRIBER_ALIAS` | (no change) | Identity events; we just refresh `revenuecat_app_user_id`. |
 | `TEST` | (no change) | Dashboard "send test event" — log only. |
 

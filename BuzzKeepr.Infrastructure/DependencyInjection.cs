@@ -112,6 +112,7 @@ public static class DependencyInjection
         services.AddScoped<Application.IdentityVerification.IPersonaClient, PersonaClient>();
         services.AddScoped<Application.Users.IUserRepository, UserRepository>();
         services.AddScoped<Application.Billing.IBillingRepository, BillingRepository>();
+        services.AddScoped<Application.Billing.IPromoCodeRepository, PromoCodeRepository>();
         services.AddScoped<Application.Billing.IRevenueCatClient, RevenueCatClient>();
         services.AddScoped<PersonaWebhookSignatureVerifier>();
         services.AddScoped<RevenueCatWebhookAuthorizer>();

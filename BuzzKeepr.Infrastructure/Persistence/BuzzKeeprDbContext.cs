@@ -10,6 +10,8 @@ public sealed class BuzzKeeprDbContext(DbContextOptions<BuzzKeeprDbContext> opti
     public DbSet<ExternalAccount> ExternalAccounts => Set<ExternalAccount>();
     public DbSet<Session> Sessions => Set<Session>();
     public DbSet<VerificationToken> VerificationTokens => Set<VerificationToken>();
+    public DbSet<PromoCode> PromoCodes => Set<PromoCode>();
+    public DbSet<PromoRedemption> PromoRedemptions => Set<PromoRedemption>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -216,6 +218,64 @@ public sealed class BuzzKeeprDbContext(DbContextOptions<BuzzKeeprDbContext> opti
                 .IsUnique();
 
             builder.HasIndex(token => new { token.Email, token.Purpose, token.ExpiresAtUtc });
+        });
+
+        modelBuilder.Entity<PromoCode>(builder =>
+        {
+            builder.HasKey(promo => promo.Id);
+
+            builder.Property(promo => promo.Code)
+                .HasMaxLength(64)
+                .IsRequired();
+
+            builder.Property(promo => promo.EntitlementId)
+                .HasMaxLength(100)
+                .IsRequired();
+
+            builder.Property(promo => promo.Duration)
+                .HasConversion<string>()
+                .HasMaxLength(50)
+                .IsRequired();
+
+            builder.Property(promo => promo.RedemptionsUsed)
+                .HasDefaultValue(0)
+                .IsRequired();
+
+            builder.Property(promo => promo.IsActive)
+                .HasDefaultValue(true)
+                .IsRequired();
+
+            builder.Property(promo => promo.ExpiresAtUtc)
+                .HasColumnType("timestamp with time zone");
+
+            builder.Property(promo => promo.CreatedAtUtc)
+                .HasColumnType("timestamp with time zone");
+
+            builder.HasIndex(promo => promo.Code)
+                .IsUnique();
+        });
+
+        modelBuilder.Entity<PromoRedemption>(builder =>
+        {
+            builder.HasKey(redemption => redemption.Id);
+
+            builder.Property(redemption => redemption.RedeemedAtUtc)
+                .HasColumnType("timestamp with time zone");
+
+            builder.HasOne(redemption => redemption.PromoCode)
+                .WithMany(promo => promo.Redemptions)
+                .HasForeignKey(redemption => redemption.PromoCodeId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            builder.HasOne(redemption => redemption.User)
+                .WithMany()
+                .HasForeignKey(redemption => redemption.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // The unique index is what enforces "each user can only redeem a given code once" —
+            // the repository relies on catching its violation as the AlreadyRedeemed signal.
+            builder.HasIndex(redemption => new { redemption.PromoCodeId, redemption.UserId })
+                .IsUnique();
         });
     }
 }
