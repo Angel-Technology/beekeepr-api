@@ -29,6 +29,7 @@ services:
       - { key: Email__WelcomeTemplateId,      sync: false }
       - { key: Email__FrontendBaseUrl,        sync: false }
       - { key: Google__ClientIds__0,          sync: false }
+      - { key: Apple__ClientIds__0,           sync: false }  # iOS bundle ID (e.g. com.buzzkeepr.app)
       - { key: Persona__ApiKey,               sync: false }
       - { key: Persona__InquiryTemplateId,    sync: false }
       - { key: Persona__ThemeSetId,           sync: false }
@@ -75,6 +76,7 @@ services:
       - { key: Email__WelcomeTemplateId,      sync: false }
       - { key: Email__FrontendBaseUrl,        sync: false }
       - { key: Google__ClientIds__0,          sync: false }
+      - { key: Apple__ClientIds__0,           sync: false }  # iOS bundle ID (e.g. com.buzzkeepr.app)
       - { key: Persona__ApiKey,               sync: false }
       - { key: Persona__InquiryTemplateId,    sync: false }
       - { key: Persona__ThemeSetId,           sync: false }

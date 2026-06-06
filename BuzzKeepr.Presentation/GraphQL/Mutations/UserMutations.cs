@@ -6,6 +6,7 @@ using BuzzKeepr.Application.Users;
 using BuzzKeepr.API.GraphQL.Inputs;
 using ApplicationRequestEmailSignInInput = BuzzKeepr.Application.Auth.Models.RequestEmailSignInInput;
 using ApplicationSignInWithGoogleInput = BuzzKeepr.Application.Auth.Models.SignInWithGoogleInput;
+using ApplicationSignInWithAppleInput = BuzzKeepr.Application.Auth.Models.SignInWithAppleInput;
 using ApplicationCreateUserInput = BuzzKeepr.Application.Users.Models.CreateUserInput;
 using ApplicationUpdateProfileInput = BuzzKeepr.Application.Users.Models.UpdateProfileInput;
 using ApplicationVerifyEmailSignInInput = BuzzKeepr.Application.Auth.Models.VerifyEmailSignInInput;
@@ -205,6 +206,60 @@ public sealed class UserMutations
         SessionCookieManager.WriteSessionCookie(httpContextEarly, result.SessionToken, result.ExpiresAtUtc.Value);
 
         return new SignInWithGooglePayload
+        {
+            User = UserGraph.From(result.User),
+            Session = new AuthSessionGraph
+            {
+                Token = result.SessionToken,
+                ExpiresAtUtc = result.ExpiresAtUtc.Value
+            }
+        };
+    }
+
+    public async Task<SignInWithApplePayload> SignInWithAppleAsync(
+        SignInWithAppleInput input,
+        [Service] IAuthService authService,
+        [Service] IHttpContextAccessor httpContextAccessor,
+        CancellationToken cancellationToken)
+    {
+        var httpContextEarly = httpContextAccessor.HttpContext
+            ?? throw new InvalidOperationException("HTTP context is required for sign-in.");
+
+        var result = await authService.SignInWithAppleAsync(new ApplicationSignInWithAppleInput
+        {
+            IdToken = input.IdToken,
+            DisplayName = input.DisplayName,
+            IpAddress = ResolveClientIpAddress(httpContextEarly),
+            UserAgent = httpContextEarly.Request.Headers.UserAgent.ToString()
+        }, cancellationToken);
+
+        if (result.InvalidInput)
+        {
+            return new SignInWithApplePayload
+            {
+                Error = "Apple identity token is required."
+            };
+        }
+
+        if (result.InvalidToken)
+        {
+            return new SignInWithApplePayload
+            {
+                Error = "Invalid Apple identity token."
+            };
+        }
+
+        if (!result.Success || result.User is null || result.SessionToken is null || !result.ExpiresAtUtc.HasValue)
+        {
+            return new SignInWithApplePayload
+            {
+                Error = "Apple sign-in failed."
+            };
+        }
+
+        SessionCookieManager.WriteSessionCookie(httpContextEarly, result.SessionToken, result.ExpiresAtUtc.Value);
+
+        return new SignInWithApplePayload
         {
             User = UserGraph.From(result.User),
             Session = new AuthSessionGraph

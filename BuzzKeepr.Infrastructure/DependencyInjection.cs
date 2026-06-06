@@ -37,6 +37,8 @@ public static class DependencyInjection
             configuration.GetSection(AuthOptions.SectionName));
         services.Configure<GoogleAuthOptions>(
             configuration.GetSection(GoogleAuthOptions.SectionName));
+        services.Configure<AppleAuthOptions>(
+            configuration.GetSection(AppleAuthOptions.SectionName));
         services.Configure<PersonaOptions>(
             configuration.GetSection(PersonaOptions.SectionName));
         services.Configure<CheckrTrustOptions>(
@@ -104,6 +106,7 @@ public static class DependencyInjection
                 httpClient.BaseAddress = baseUri;
         });
         services.AddScoped<Application.Auth.IGoogleTokenVerifier, GoogleTokenVerifier>();
+        services.AddSingleton<Application.Auth.IAppleTokenVerifier, AppleTokenVerifier>();
         services.AddScoped<Application.Auth.IEmailSignInSender, ResendEmailSignInSender>();
         services.AddScoped<Application.Users.IWelcomeEmailSender, ResendWelcomeEmailSender>();
         services.AddScoped<Application.Auth.IAuthRepository, AuthRepository>();
