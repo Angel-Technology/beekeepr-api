@@ -20,6 +20,7 @@ public sealed class BuzzKeeprApiFactory(PostgresFixture postgres, string? appApi
     public FakeEmailSignInSender FakeEmailSender { get; } = new();
     public FakeWelcomeEmailSender FakeWelcomeSender { get; } = new();
     public FakeGoogleTokenVerifier FakeGoogleVerifier { get; } = new();
+    public FakeAppleTokenVerifier FakeAppleVerifier { get; } = new();
     public FakePersonaClient FakePersona { get; } = new();
     public FakeCheckrTrustClient FakeCheckrTrust { get; } = new();
     public FakeRevenueCatClient FakeRevenueCat { get; } = new();
@@ -43,6 +44,7 @@ public sealed class BuzzKeeprApiFactory(PostgresFixture postgres, string? appApi
                 ["Email:SignInTemplateId"] = "test-signin-template-id",
                 ["Email:WelcomeTemplateId"] = "test-welcome-template-id",
                 ["Google:ClientIds:0"] = "test-google-client-id.apps.googleusercontent.com",
+                ["Apple:ClientIds:0"] = "com.buzzkeepr.app.test",
                 ["Persona:ApiBaseUrl"] = "https://persona.test.invalid",
                 ["Persona:ApiKey"] = "persona_test_dummy",
                 ["Persona:InquiryTemplateId"] = "itmpl_test",
@@ -69,6 +71,7 @@ public sealed class BuzzKeeprApiFactory(PostgresFixture postgres, string? appApi
             services.RemoveAll<IEmailSignInSender>();
             services.RemoveAll<IWelcomeEmailSender>();
             services.RemoveAll<IGoogleTokenVerifier>();
+            services.RemoveAll<IAppleTokenVerifier>();
             services.RemoveAll<IPersonaClient>();
             services.RemoveAll<ICheckrTrustClient>();
             services.RemoveAll<IRevenueCatClient>();
@@ -76,6 +79,7 @@ public sealed class BuzzKeeprApiFactory(PostgresFixture postgres, string? appApi
             services.AddSingleton(FakeEmailSender);
             services.AddSingleton(FakeWelcomeSender);
             services.AddSingleton(FakeGoogleVerifier);
+            services.AddSingleton(FakeAppleVerifier);
             services.AddSingleton(FakePersona);
             services.AddSingleton(FakeCheckrTrust);
             services.AddSingleton(FakeRevenueCat);
@@ -83,6 +87,7 @@ public sealed class BuzzKeeprApiFactory(PostgresFixture postgres, string? appApi
             services.AddScoped<IEmailSignInSender>(sp => sp.GetRequiredService<FakeEmailSignInSender>());
             services.AddScoped<IWelcomeEmailSender>(sp => sp.GetRequiredService<FakeWelcomeEmailSender>());
             services.AddScoped<IGoogleTokenVerifier>(sp => sp.GetRequiredService<FakeGoogleTokenVerifier>());
+            services.AddScoped<IAppleTokenVerifier>(sp => sp.GetRequiredService<FakeAppleTokenVerifier>());
             services.AddScoped<IPersonaClient>(sp => sp.GetRequiredService<FakePersonaClient>());
             services.AddScoped<ICheckrTrustClient>(sp => sp.GetRequiredService<FakeCheckrTrustClient>());
             services.AddScoped<IRevenueCatClient>(sp => sp.GetRequiredService<FakeRevenueCatClient>());

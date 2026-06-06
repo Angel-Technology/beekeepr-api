@@ -16,4 +16,7 @@ public interface IAuthService
 
     Task<SignInWithGoogleResult>
         SignInWithGoogleAsync(SignInWithGoogleInput input, CancellationToken cancellationToken);
+
+    Task<SignInWithAppleResult>
+        SignInWithAppleAsync(SignInWithAppleInput input, CancellationToken cancellationToken);
 }

@@ -16,6 +16,7 @@ public sealed class AuthService(
     IAuthRepository authRepository,
     IEmailSignInSender emailSignInSender,
     IGoogleTokenVerifier googleTokenVerifier,
+    IAppleTokenVerifier appleTokenVerifier,
     IWelcomeEmailSender welcomeEmailSender,
     IOptions<AuthOptions> authOptions,
     ILogger<AuthService> logger) : IAuthService
@@ -339,6 +340,114 @@ public sealed class AuthService(
             await TrySendWelcomeAsync(user, cancellationToken);
 
         return new SignInWithGoogleResult
+        {
+            Success = true,
+            SessionToken = rawSessionToken,
+            ExpiresAtUtc = session.ExpiresAtUtc,
+            User = MapUser(user)
+        };
+    }
+
+    public async Task<SignInWithAppleResult> SignInWithAppleAsync(
+        SignInWithAppleInput input,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(input.IdToken))
+            return new SignInWithAppleResult
+            {
+                InvalidInput = true
+            };
+
+        var identity = await appleTokenVerifier.VerifyIdTokenAsync(input.IdToken, cancellationToken);
+
+        if (identity is null)
+            return new SignInWithAppleResult
+            {
+                InvalidToken = true
+            };
+
+        var normalizedEmail = NormalizeEmail(identity.Email);
+        var nowUtc = DateTime.UtcNow;
+        var externalAccount = await authRepository.GetExternalAccountAsync(
+            AuthProvider.Apple,
+            identity.ProviderAccountId,
+            cancellationToken);
+
+        // Apple only sends the user's name on the very first authorization, and the
+        // frontend forwards it via input.DisplayName. Subsequent sign-ins arrive with
+        // input.DisplayName == null, so we treat it as additive only (never overwrite).
+        var displayNameFromClient = string.IsNullOrWhiteSpace(input.DisplayName)
+            ? null
+            : input.DisplayName.Trim();
+
+        User user;
+        var isNewUser = false;
+
+        if (externalAccount is not null)
+        {
+            user = externalAccount.User;
+            externalAccount.ProviderEmail = normalizedEmail;
+            externalAccount.LastSignInAtUtc = nowUtc;
+            RecoverIfPendingDeletion(user);
+        }
+        else
+        {
+            var existingUser = await authRepository.GetUserByEmailAsync(normalizedEmail, cancellationToken);
+            isNewUser = existingUser is null;
+            if (existingUser is not null)
+                RecoverIfPendingDeletion(existingUser);
+
+            user = existingUser ?? new User
+            {
+                Id = Guid.NewGuid(),
+                Email = normalizedEmail,
+                DisplayName = displayNameFromClient,
+                EmailVerified = identity.EmailVerified,
+                CreatedAtUtc = nowUtc
+            };
+
+            // Apple guarantees the email is verified (whether real or @privaterelay).
+            user.EmailVerified = user.EmailVerified || identity.EmailVerified;
+            user.DisplayName ??= displayNameFromClient;
+
+            if (isNewUser) await authRepository.AddUserAsync(user, cancellationToken);
+
+            externalAccount = new ExternalAccount
+            {
+                Id = Guid.NewGuid(),
+                UserId = user.Id,
+                Provider = AuthProvider.Apple,
+                ProviderAccountId = identity.ProviderAccountId,
+                ProviderEmail = normalizedEmail,
+                CreatedAtUtc = nowUtc,
+                LastSignInAtUtc = nowUtc,
+                User = user
+            };
+
+            await authRepository.AddExternalAccountAsync(externalAccount, cancellationToken);
+        }
+
+        var rawSessionToken = CreateOpaqueToken();
+        var session = new Session
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            TokenHash = HashToken(rawSessionToken),
+            CreatedAtUtc = nowUtc,
+            ExpiresAtUtc = nowUtc.Add(SessionLifetime),
+            LastSeenAtUtc = nowUtc,
+            IpAddress = TrimToMax(input.IpAddress, 64),
+            UserAgent = TrimToMax(input.UserAgent, 512)
+        };
+
+        await authRepository.AddSessionAsync(session, cancellationToken);
+        await authRepository.SaveChangesAsync(cancellationToken);
+
+        // Mirror Google: only welcome new users, and only if we have a name to greet by.
+        if (isNewUser && !string.IsNullOrWhiteSpace(user.DisplayName))
+            await TrySendWelcomeAsync(user, cancellationToken);
+
+        return new SignInWithAppleResult
         {
             Success = true,
             SessionToken = rawSessionToken,

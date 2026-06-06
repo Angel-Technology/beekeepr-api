@@ -17,6 +17,7 @@ public sealed class AuthServiceTests
     private readonly IAuthRepository repository = Substitute.For<IAuthRepository>();
     private readonly IEmailSignInSender emailSender = Substitute.For<IEmailSignInSender>();
     private readonly IGoogleTokenVerifier googleVerifier = Substitute.For<IGoogleTokenVerifier>();
+    private readonly IAppleTokenVerifier appleVerifier = Substitute.For<IAppleTokenVerifier>();
     private readonly IWelcomeEmailSender welcomeSender = Substitute.For<IWelcomeEmailSender>();
     private readonly AuthOptions authOptions = new();
     private AuthService sut;
@@ -30,6 +31,7 @@ public sealed class AuthServiceTests
         repository,
         emailSender,
         googleVerifier,
+        appleVerifier,
         welcomeSender,
         Options.Create(authOptions),
         NullLogger<AuthService>.Instance);
@@ -157,6 +159,27 @@ public sealed class AuthServiceTests
             .Returns((GoogleIdentity?)null);
 
         var result = await sut.SignInWithGoogleAsync(new SignInWithGoogleInput { IdToken = "rejected-token" }, default);
+
+        Assert.True(result.InvalidToken);
+        Assert.False(result.Success);
+    }
+
+    [Fact]
+    public async Task SignInWithApple_WithBlankIdToken_ReturnsInvalidInput()
+    {
+        var result = await sut.SignInWithAppleAsync(new SignInWithAppleInput { IdToken = "" }, default);
+
+        Assert.True(result.InvalidInput);
+        await appleVerifier.DidNotReceive().VerifyIdTokenAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task SignInWithApple_WhenVerifierReturnsNull_ReturnsInvalidToken()
+    {
+        appleVerifier.VerifyIdTokenAsync("rejected-token", Arg.Any<CancellationToken>())
+            .Returns((AppleIdentity?)null);
+
+        var result = await sut.SignInWithAppleAsync(new SignInWithAppleInput { IdToken = "rejected-token" }, default);
 
         Assert.True(result.InvalidToken);
         Assert.False(result.Success);

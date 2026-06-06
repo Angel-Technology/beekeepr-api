@@ -8,6 +8,7 @@ Read [`../architectural-patterns.md`](../architectural-patterns.md) first for th
 | ------- | ------ | --- |
 | Email sign-in (passwordless) | Complete | [authentication-email-signin.md](authentication-email-signin.md) |
 | Google sign-in (OAuth ID token) | Complete | [authentication-google-signin.md](authentication-google-signin.md) |
+| Apple sign-in (OIDC identity token) | Complete | [authentication-apple-signin.md](authentication-apple-signin.md) |
 | User management (create, profile, terms) | Complete | [user-management.md](user-management.md) |
 | Identity verification — Persona (KYC) | Complete | [identity-verification-persona.md](identity-verification-persona.md) |
 | Identity verification — Checkr Trust (instant criminal) | Complete | [identity-verification-checkr.md](identity-verification-checkr.md) |
