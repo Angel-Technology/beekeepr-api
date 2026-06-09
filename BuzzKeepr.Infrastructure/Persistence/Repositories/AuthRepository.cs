@@ -117,6 +117,15 @@ public sealed class AuthRepository(BuzzKeeprDbContext dbContext) : IAuthReposito
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<int> DeleteAgedVerificationTokensAsync(DateTime cutoffUtc, CancellationToken cancellationToken)
+    {
+        // Tokens expire 15 minutes after issue (AuthService.SessionLifetime is unrelated —
+        // see RequestEmailSignInAsync). Anything expired past the cutoff is dead weight.
+        return await dbContext.VerificationTokens
+            .Where(token => token.ExpiresAtUtc < cutoffUtc)
+            .ExecuteDeleteAsync(cancellationToken);
+    }
+
     public async Task AddVerificationTokenAsync(VerificationToken verificationToken, CancellationToken cancellationToken)
     {
         await dbContext.VerificationTokens.AddAsync(verificationToken, cancellationToken);

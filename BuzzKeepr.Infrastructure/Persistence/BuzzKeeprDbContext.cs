@@ -214,8 +214,13 @@ public sealed class BuzzKeeprDbContext(DbContextOptions<BuzzKeeprDbContext> opti
                 .HasForeignKey(token => token.UserId)
                 .OnDelete(DeleteBehavior.SetNull);
 
+            // Partial: uniqueness only needs to hold among lookup-able rows (the verify path
+            // filters ConsumedAtUtc IS NULL). Without the filter, re-issuing a sign-in code
+            // whose hash matches an already-consumed row 23505s — e.g. review-account static
+            // PINs always hash to the same value.
             builder.HasIndex(token => token.TokenHash)
-                .IsUnique();
+                .IsUnique()
+                .HasFilter("\"ConsumedAtUtc\" IS NULL");
 
             builder.HasIndex(token => new { token.Email, token.Purpose, token.ExpiresAtUtc });
         });
