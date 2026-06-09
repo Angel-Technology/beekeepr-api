@@ -120,6 +120,7 @@ public static class DependencyInjection
         services.AddScoped<PersonaWebhookSignatureVerifier>();
         services.AddScoped<RevenueCatWebhookAuthorizer>();
         services.AddHostedService<Auth.SessionCleanupBackgroundService>();
+        services.AddHostedService<Auth.VerificationTokenCleanupBackgroundService>();
         services.AddHostedService<Auth.WelcomeEmailSweeperBackgroundService>();
         services.AddHostedService<IdentityVerification.BackgroundCheckRenewalBackgroundService>();
         services.AddHostedService<Users.AccountDeletionPurgeBackgroundService>();

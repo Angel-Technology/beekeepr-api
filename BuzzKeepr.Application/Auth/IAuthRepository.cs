@@ -31,6 +31,8 @@ public interface IAuthRepository
 
     Task IncrementVerificationTokenFailedAttemptsAsync(Guid verificationTokenId, CancellationToken cancellationToken);
 
+    Task<int> DeleteAgedVerificationTokensAsync(DateTime cutoffUtc, CancellationToken cancellationToken);
+
     Task AddVerificationTokenAsync(VerificationToken verificationToken, CancellationToken cancellationToken);
 
     Task AddSessionAsync(Session session, CancellationToken cancellationToken);
