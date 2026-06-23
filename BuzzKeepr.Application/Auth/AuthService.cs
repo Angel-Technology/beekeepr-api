@@ -235,7 +235,7 @@ public sealed class AuthService(
         // Email sign-in users have no display name yet — sending a welcome here would render
         // "Welcome to BuzzKeepr, there." Defer until we have a name (Persona webhook will
         // trigger the welcome with verifiedFirstName when verification approves).
-        if (isNewUser && !string.IsNullOrWhiteSpace(user.DisplayName))
+        if (isNewUser && !string.IsNullOrWhiteSpace(user.Profile?.DisplayName))
             await TrySendWelcomeAsync(user, cancellationToken);
 
         return new VerifyEmailSignInResult
@@ -293,15 +293,21 @@ public sealed class AuthService(
             {
                 Id = Guid.NewGuid(),
                 Email = normalizedEmail,
-                DisplayName = string.IsNullOrWhiteSpace(identity.DisplayName) ? null : identity.DisplayName.Trim(),
-                ImageUrl = identity.ImageUrl,
                 EmailVerified = true,
                 CreatedAtUtc = nowUtc
             };
 
             user.EmailVerified = true;
-            user.DisplayName ??= string.IsNullOrWhiteSpace(identity.DisplayName) ? null : identity.DisplayName.Trim();
-            user.ImageUrl ??= identity.ImageUrl;
+
+            var trimmedGoogleDisplayName = string.IsNullOrWhiteSpace(identity.DisplayName)
+                ? null
+                : identity.DisplayName.Trim();
+            if (!string.IsNullOrWhiteSpace(trimmedGoogleDisplayName) || !string.IsNullOrWhiteSpace(identity.ImageUrl))
+            {
+                var profile = user.EnsureProfile();
+                profile.DisplayName ??= trimmedGoogleDisplayName;
+                profile.ImageUrl ??= identity.ImageUrl;
+            }
 
             if (isNewUser) await authRepository.AddUserAsync(user, cancellationToken);
 
@@ -401,14 +407,17 @@ public sealed class AuthService(
             {
                 Id = Guid.NewGuid(),
                 Email = normalizedEmail,
-                DisplayName = displayNameFromClient,
                 EmailVerified = identity.EmailVerified,
                 CreatedAtUtc = nowUtc
             };
 
             // Apple guarantees the email is verified (whether real or @privaterelay).
             user.EmailVerified = user.EmailVerified || identity.EmailVerified;
-            user.DisplayName ??= displayNameFromClient;
+
+            if (!string.IsNullOrWhiteSpace(displayNameFromClient))
+            {
+                user.EnsureProfile().DisplayName ??= displayNameFromClient;
+            }
 
             if (isNewUser) await authRepository.AddUserAsync(user, cancellationToken);
 
@@ -444,7 +453,7 @@ public sealed class AuthService(
         await authRepository.SaveChangesAsync(cancellationToken);
 
         // Mirror Google: only welcome new users, and only if we have a name to greet by.
-        if (isNewUser && !string.IsNullOrWhiteSpace(user.DisplayName))
+        if (isNewUser && !string.IsNullOrWhiteSpace(user.Profile?.DisplayName))
             await TrySendWelcomeAsync(user, cancellationToken);
 
         return new SignInWithAppleResult
@@ -508,7 +517,7 @@ public sealed class AuthService(
     {
         try
         {
-            await welcomeEmailSender.SendWelcomeAsync(user.Email, user.DisplayName, cancellationToken);
+            await welcomeEmailSender.SendWelcomeAsync(user.Email, user.Profile?.DisplayName, cancellationToken);
             user.WelcomeEmailSentAtUtc = DateTime.UtcNow;
             await authRepository.SaveChangesAsync(cancellationToken);
         }
@@ -538,31 +547,35 @@ public sealed class AuthService(
 
     private static UserDto MapUser(User user)
     {
+        var profile = user.Profile;
+        var iv = user.IdentityVerification;
+        var bc = user.BackgroundCheck;
+
         return new UserDto
         {
             Id = user.Id,
             Email = user.Email,
-            DisplayName = user.DisplayName,
-            ImageUrl = user.ImageUrl,
+            DisplayName = profile?.DisplayName,
+            ImageUrl = profile?.ImageUrl,
             EmailVerified = user.EmailVerified,
-            IdentityVerificationStatus = user.IdentityVerificationStatus,
-            PersonaInquiryId = user.PersonaInquiryId,
-            PersonaInquiryStatus = user.PersonaInquiryStatus,
-            VerifiedFirstName = user.VerifiedFirstName,
-            VerifiedMiddleName = user.VerifiedMiddleName,
-            VerifiedLastName = user.VerifiedLastName,
-            VerifiedBirthdate = user.VerifiedBirthdate,
-            VerifiedLicenseState = user.VerifiedLicenseState,
-            PhoneNumber = user.PhoneNumber,
-            PersonaVerifiedAtUtc = user.PersonaVerifiedAtUtc,
-            BackgroundCheckBadge = user.BackgroundCheckBadge,
-            BackgroundCheckBadgeExpiresAtUtc = user.BackgroundCheckBadgeExpiresAtUtc,
+            IdentityVerificationStatus = iv?.Status ?? IdentityVerificationStatus.NotStarted,
+            PersonaInquiryId = iv?.PersonaInquiryId,
+            PersonaInquiryStatus = iv?.PersonaInquiryStatus,
+            VerifiedFirstName = iv?.VerifiedFirstName,
+            VerifiedMiddleName = iv?.VerifiedMiddleName,
+            VerifiedLastName = iv?.VerifiedLastName,
+            VerifiedBirthdate = iv?.VerifiedBirthdate,
+            VerifiedLicenseState = iv?.VerifiedLicenseState,
+            PhoneNumber = profile?.PhoneNumber,
+            PersonaVerifiedAtUtc = iv?.PersonaVerifiedAtUtc,
+            BackgroundCheckBadge = bc?.Badge ?? BackgroundCheckBadge.None,
+            BackgroundCheckBadgeExpiresAtUtc = bc?.BadgeExpiresAtUtc,
             TermsAcceptedAtUtc = user.TermsAcceptedAtUtc,
             Subscription = SubscriptionDto.FromUser(user),
             CreatedAtUtc = user.CreatedAtUtc,
             DeletedAtUtc = user.DeletedAtUtc,
-            Nickname = user.Nickname,
-            Handle = user.Handle
+            Nickname = profile?.Nickname,
+            Handle = profile?.Handle
         };
     }
 }

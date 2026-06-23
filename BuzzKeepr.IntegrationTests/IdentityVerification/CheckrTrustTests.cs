@@ -1,5 +1,6 @@
 using System.Text.Json;
 using BuzzKeepr.Application.IdentityVerification.Models;
+using BuzzKeepr.Domain.Entities;
 using BuzzKeepr.Domain.Enums;
 using BuzzKeepr.Infrastructure.Persistence;
 using BuzzKeepr.IntegrationTests.Common;
@@ -75,13 +76,13 @@ public sealed class CheckrTrustTests(PostgresFixture postgres) : IAsyncLifetime
 
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
-        var user = await dbContext.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
-        Assert.Equal("prf_first", user.CheckrProfileId);
-        Assert.Equal("chk_first", user.CheckrLastCheckId);
-        Assert.Equal(BackgroundCheckBadge.Approved, user.BackgroundCheckBadge);
+        var bc = await dbContext.UserBackgroundChecks.AsNoTracking().FirstAsync(b => b.UserId == userId);
+        Assert.Equal("prf_first", bc.CheckrProfileId);
+        Assert.Equal("chk_first", bc.CheckrLastCheckId);
+        Assert.Equal(BackgroundCheckBadge.Approved, bc.Badge);
         var expectedExpiry = DateTime.UtcNow.AddMonths(3);
-        Assert.NotNull(user.BackgroundCheckBadgeExpiresAtUtc);
-        Assert.InRange(user.BackgroundCheckBadgeExpiresAtUtc!.Value,
+        Assert.NotNull(bc.BadgeExpiresAtUtc);
+        Assert.InRange(bc.BadgeExpiresAtUtc!.Value,
             expectedExpiry.AddMinutes(-1), expectedExpiry.AddMinutes(1));
     }
 
@@ -108,9 +109,9 @@ public sealed class CheckrTrustTests(PostgresFixture postgres) : IAsyncLifetime
 
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
-        var user = await dbContext.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
-        Assert.Equal(BackgroundCheckBadge.Denied, user.BackgroundCheckBadge);
-        Assert.NotNull(user.BackgroundCheckBadgeExpiresAtUtc);
+        var bc = await dbContext.UserBackgroundChecks.AsNoTracking().FirstAsync(b => b.UserId == userId);
+        Assert.Equal(BackgroundCheckBadge.Denied, bc.Badge);
+        Assert.NotNull(bc.BadgeExpiresAtUtc);
     }
 
     [Fact]
@@ -141,8 +142,8 @@ public sealed class CheckrTrustTests(PostgresFixture postgres) : IAsyncLifetime
 
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
-        var user = await dbContext.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
-        Assert.Equal("+14155552671", user.PhoneNumber);
+        var profile = await dbContext.UserProfiles.AsNoTracking().FirstAsync(p => p.UserId == userId);
+        Assert.Equal("+14155552671", profile.PhoneNumber);
     }
 
     [Fact]
@@ -194,14 +195,18 @@ public sealed class CheckrTrustTests(PostgresFixture postgres) : IAsyncLifetime
     {
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
-        await dbContext.Users
-            .Where(u => u.Id == userId)
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(u => u.VerifiedFirstName, firstName)
-                .SetProperty(u => u.VerifiedMiddleName, middleName)
-                .SetProperty(u => u.VerifiedLastName, lastName)
-                .SetProperty(u => u.VerifiedBirthdate, birthdate)
-                .SetProperty(u => u.VerifiedLicenseState, licenseState));
+        var iv = await dbContext.UserIdentityVerifications.FirstOrDefaultAsync(i => i.UserId == userId);
+        if (iv is null)
+        {
+            iv = new UserIdentityVerification { Id = Guid.NewGuid(), UserId = userId };
+            dbContext.UserIdentityVerifications.Add(iv);
+        }
+        iv.VerifiedFirstName = firstName;
+        iv.VerifiedMiddleName = middleName;
+        iv.VerifiedLastName = lastName;
+        iv.VerifiedBirthdate = birthdate;
+        iv.VerifiedLicenseState = licenseState;
+        await dbContext.SaveChangesAsync();
     }
 
     private async Task<(string Token, Guid UserId)> SignInAsync()

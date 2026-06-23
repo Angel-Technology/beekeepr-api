@@ -149,12 +149,16 @@ public sealed class UserSearchTests(PostgresFixture postgres) : IAsyncLifetime
         {
             Id = Guid.NewGuid(),
             Email = $"seed-{Guid.NewGuid():N}@buzzkeepr.test",
-            Handle = handle,
-            DisplayName = displayName,
-            Nickname = nickname,
             EmailVerified = true,
             CreatedAtUtc = DateTime.UtcNow,
         };
+        if (handle != null || displayName != null || nickname != null)
+        {
+            var profile = user.EnsureProfile();
+            profile.Handle = handle;
+            profile.DisplayName = displayName;
+            profile.Nickname = nickname;
+        }
         dbContext.Users.Add(user);
         await dbContext.SaveChangesAsync();
         return user.Id;
@@ -164,8 +168,18 @@ public sealed class UserSearchTests(PostgresFixture postgres) : IAsyncLifetime
     {
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
-        var user = await dbContext.Users.FirstAsync(u => u.Id == userId);
-        user.Handle = handle;
+        var profile = await dbContext.UserProfiles.FirstOrDefaultAsync(p => p.UserId == userId);
+        if (profile is null)
+        {
+            profile = new UserProfile
+            {
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                CreatedAtUtc = DateTime.UtcNow
+            };
+            dbContext.UserProfiles.Add(profile);
+        }
+        profile.Handle = handle;
         await dbContext.SaveChangesAsync();
     }
 

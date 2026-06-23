@@ -23,24 +23,29 @@ public sealed class SubscriptionDto
 
     public static SubscriptionDto FromUser(User user)
     {
+        var sub = user.Subscription;
         return new SubscriptionDto
         {
-            Status = user.SubscriptionStatus,
-            Entitlement = user.SubscriptionEntitlement,
-            ProductId = user.SubscriptionProductId,
-            Store = user.SubscriptionStore,
-            CurrentPeriodEndUtc = user.SubscriptionCurrentPeriodEndUtc,
-            WillRenew = user.SubscriptionWillRenew,
+            Status = sub?.Status ?? SubscriptionStatus.None,
+            Entitlement = sub?.Entitlement,
+            ProductId = sub?.ProductId,
+            Store = sub?.Store,
+            CurrentPeriodEndUtc = sub?.CurrentPeriodEndUtc,
+            WillRenew = sub?.WillRenew,
             IsActive = IsLocallyActive(user)
         };
     }
 
     public static bool IsLocallyActive(User user)
     {
-        if (user.SubscriptionStatus is SubscriptionStatus.None or SubscriptionStatus.Expired)
+        var sub = user.Subscription;
+        if (sub is null)
             return false;
 
-        return !user.SubscriptionCurrentPeriodEndUtc.HasValue
-            || user.SubscriptionCurrentPeriodEndUtc.Value > DateTime.UtcNow;
+        if (sub.Status is SubscriptionStatus.None or SubscriptionStatus.Expired)
+            return false;
+
+        return !sub.CurrentPeriodEndUtc.HasValue
+            || sub.CurrentPeriodEndUtc.Value > DateTime.UtcNow;
     }
 }

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using BuzzKeepr.Application.IdentityVerification.Models;
 using BuzzKeepr.Application.Users;
+using BuzzKeepr.Domain.Entities;
 using BuzzKeepr.Domain.Enums;
 using Microsoft.Extensions.Logging;
 
@@ -51,38 +52,43 @@ public sealed class IdentityVerificationService(
             };
         }
 
-        var shouldCreateNewInquiry = string.IsNullOrWhiteSpace(user.PersonaInquiryId)
-            || user.PersonaInquiryStatus is null
-            || RetryableStatuses.Contains(user.IdentityVerificationStatus);
+        var iv = user.IdentityVerification;
+        var currentIdentityStatus = iv?.Status ?? IdentityVerificationStatus.NotStarted;
+        var currentInquiryStatus = iv?.PersonaInquiryStatus;
+        var currentInquiryId = iv?.PersonaInquiryId;
+
+        var shouldCreateNewInquiry = string.IsNullOrWhiteSpace(currentInquiryId)
+            || currentInquiryStatus is null
+            || RetryableStatuses.Contains(currentIdentityStatus);
 
         if (!shouldCreateNewInquiry)
         {
             logger.LogInformation(
                 "Reusing Persona inquiry {InquiryId} for user {UserId} with status {PersonaInquiryStatus}.",
-                user.PersonaInquiryId,
+                currentInquiryId,
                 user.Id,
-                user.PersonaInquiryStatus);
+                currentInquiryStatus);
 
             // Don't try to mint a session token for an inquiry the user has
             // already submitted (Approved/Completed/NeedsReview). Persona's
             // `/resume` 409s on those, and there's no SDK launch needed —
             // just hand the client a refreshed status and let it route.
-            if (!SdkLaunchableStatuses.Contains(user.IdentityVerificationStatus))
+            if (!SdkLaunchableStatuses.Contains(currentIdentityStatus))
             {
                 logger.LogInformation(
                     "Skipping Persona SDK launch for user {UserId}: status is {IdentityStatus}, no further user action needed.",
                     user.Id,
-                    user.IdentityVerificationStatus);
+                    currentIdentityStatus);
 
                 return new StartPersonaInquiryResult
                 {
                     Success = true,
                     CreatedNewInquiry = false,
-                    InquiryId = user.PersonaInquiryId,
+                    InquiryId = currentInquiryId,
                     // Intentionally no SessionToken — the client treats this
                     // as "no SDK launch required, just refresh".
-                    IdentityVerificationStatus = user.IdentityVerificationStatus,
-                    PersonaInquiryStatus = user.PersonaInquiryStatus
+                    IdentityVerificationStatus = currentIdentityStatus,
+                    PersonaInquiryStatus = currentInquiryStatus
                 };
             }
 
@@ -90,23 +96,23 @@ public sealed class IdentityVerificationService(
             // time the client asks to launch — even when the inquiry itself
             // is being reused.
             var reusedSessionTokenResult = await personaClient.CreateInquirySessionTokenAsync(
-                user.PersonaInquiryId!,
+                currentInquiryId!,
                 cancellationToken);
 
             if (!reusedSessionTokenResult.Success || string.IsNullOrWhiteSpace(reusedSessionTokenResult.SessionToken))
             {
                 logger.LogWarning(
                     "Persona session token mint failed for reused inquiry {InquiryId} (user {UserId}). Error: {Error}",
-                    user.PersonaInquiryId,
+                    currentInquiryId,
                     user.Id,
                     reusedSessionTokenResult.Error);
 
                 return new StartPersonaInquiryResult
                 {
                     Error = reusedSessionTokenResult.Error ?? "Unable to mint a Persona session token for the existing inquiry.",
-                    InquiryId = user.PersonaInquiryId,
-                    IdentityVerificationStatus = user.IdentityVerificationStatus,
-                    PersonaInquiryStatus = user.PersonaInquiryStatus
+                    InquiryId = currentInquiryId,
+                    IdentityVerificationStatus = currentIdentityStatus,
+                    PersonaInquiryStatus = currentInquiryStatus
                 };
             }
 
@@ -114,10 +120,10 @@ public sealed class IdentityVerificationService(
             {
                 Success = true,
                 CreatedNewInquiry = false,
-                InquiryId = user.PersonaInquiryId,
+                InquiryId = currentInquiryId,
                 SessionToken = reusedSessionTokenResult.SessionToken,
-                IdentityVerificationStatus = user.IdentityVerificationStatus,
-                PersonaInquiryStatus = user.PersonaInquiryStatus
+                IdentityVerificationStatus = currentIdentityStatus,
+                PersonaInquiryStatus = currentInquiryStatus
             };
         }
 
@@ -125,7 +131,7 @@ public sealed class IdentityVerificationService(
             new CreatePersonaInquiryInput
             {
                 ReferenceId = user.Id.ToString(),
-                DisplayName = user.DisplayName,
+                DisplayName = user.Profile?.DisplayName,
                 EmailAddress = user.Email
             },
             cancellationToken);
@@ -142,42 +148,43 @@ public sealed class IdentityVerificationService(
             return new StartPersonaInquiryResult
             {
                 Error = createInquiryResult.Error ?? "Persona inquiry creation failed.",
-                IdentityVerificationStatus = user.IdentityVerificationStatus,
-                PersonaInquiryStatus = user.PersonaInquiryStatus
+                IdentityVerificationStatus = currentIdentityStatus,
+                PersonaInquiryStatus = currentInquiryStatus
             };
         }
 
         var inquiryStatus = MapPersonaInquiryStatus(createInquiryResult.InquiryStatus);
-        user.PersonaInquiryId = createInquiryResult.InquiryId;
-        user.PersonaInquiryStatus = inquiryStatus;
-        user.IdentityVerificationStatus = MapIdentityVerificationStatus(inquiryStatus);
+        var persistedIv = user.EnsureIdentityVerification();
+        persistedIv.PersonaInquiryId = createInquiryResult.InquiryId;
+        persistedIv.PersonaInquiryStatus = inquiryStatus;
+        persistedIv.Status = MapIdentityVerificationStatus(inquiryStatus);
 
         await identityVerificationRepository.SaveChangesAsync(cancellationToken);
 
         logger.LogInformation(
             "Created Persona inquiry {InquiryId} for user {UserId} with status {PersonaInquiryStatus}.",
-            user.PersonaInquiryId,
+            persistedIv.PersonaInquiryId,
             user.Id,
-            user.PersonaInquiryStatus);
+            persistedIv.PersonaInquiryStatus);
 
         var sessionTokenResult = await personaClient.CreateInquirySessionTokenAsync(
-            user.PersonaInquiryId!,
+            persistedIv.PersonaInquiryId!,
             cancellationToken);
 
         if (!sessionTokenResult.Success || string.IsNullOrWhiteSpace(sessionTokenResult.SessionToken))
         {
             logger.LogWarning(
                 "Persona session token mint failed for new inquiry {InquiryId} (user {UserId}). Error: {Error}",
-                user.PersonaInquiryId,
+                persistedIv.PersonaInquiryId,
                 user.Id,
                 sessionTokenResult.Error);
 
             return new StartPersonaInquiryResult
             {
                 Error = sessionTokenResult.Error ?? "Unable to mint a Persona session token for the new inquiry.",
-                InquiryId = user.PersonaInquiryId,
-                IdentityVerificationStatus = user.IdentityVerificationStatus,
-                PersonaInquiryStatus = user.PersonaInquiryStatus
+                InquiryId = persistedIv.PersonaInquiryId,
+                IdentityVerificationStatus = persistedIv.Status,
+                PersonaInquiryStatus = persistedIv.PersonaInquiryStatus
             };
         }
 
@@ -185,10 +192,10 @@ public sealed class IdentityVerificationService(
         {
             Success = true,
             CreatedNewInquiry = true,
-            InquiryId = user.PersonaInquiryId,
+            InquiryId = persistedIv.PersonaInquiryId,
             SessionToken = sessionTokenResult.SessionToken,
-            IdentityVerificationStatus = user.IdentityVerificationStatus,
-            PersonaInquiryStatus = user.PersonaInquiryStatus
+            IdentityVerificationStatus = persistedIv.Status,
+            PersonaInquiryStatus = persistedIv.PersonaInquiryStatus
         };
     }
 
@@ -215,6 +222,8 @@ public sealed class IdentityVerificationService(
             return;
         }
 
+        var iv = user.EnsureIdentityVerification();
+
         // Strictly-older drop only. Persona can stamp consecutive state transitions
         // (e.g. `completed` → `approved`) with the same `updated-at` when they fire close
         // together; using `<=` here dropped the approved event in prod, leaving the user
@@ -222,25 +231,25 @@ public sealed class IdentityVerificationService(
         // writes are overwrites, PII writes are guarded by `verifiedDataAlreadyPresent`,
         // and the welcome-email send is guarded by `WelcomeEmailSentAtUtc`.
         if (inquiryUpdatedAtUtc.HasValue
-            && user.PersonaInquiryUpdatedAtUtc.HasValue
-            && inquiryUpdatedAtUtc.Value < user.PersonaInquiryUpdatedAtUtc.Value)
+            && iv.PersonaInquiryUpdatedAtUtc.HasValue
+            && inquiryUpdatedAtUtc.Value < iv.PersonaInquiryUpdatedAtUtc.Value)
         {
             logger.LogInformation(
                 "Skipping stale Persona webhook for inquiry {InquiryId}: event @{IncomingUpdatedAt:o} is older than stored @{StoredUpdatedAt:o}.",
                 inquiryId,
                 inquiryUpdatedAtUtc.Value,
-                user.PersonaInquiryUpdatedAtUtc.Value);
+                iv.PersonaInquiryUpdatedAtUtc.Value);
             return;
         }
 
         var newIdentityStatus = MapIdentityVerificationStatus(inquiryStatus);
-        var verifiedDataAlreadyPresent = !string.IsNullOrWhiteSpace(user.VerifiedFirstName);
+        var verifiedDataAlreadyPresent = !string.IsNullOrWhiteSpace(iv.VerifiedFirstName);
 
-        user.PersonaInquiryStatus = inquiryStatus;
-        user.IdentityVerificationStatus = newIdentityStatus;
+        iv.PersonaInquiryStatus = inquiryStatus;
+        iv.Status = newIdentityStatus;
 
         if (inquiryUpdatedAtUtc.HasValue)
-            user.PersonaInquiryUpdatedAtUtc = inquiryUpdatedAtUtc.Value;
+            iv.PersonaInquiryUpdatedAtUtc = inquiryUpdatedAtUtc.Value;
 
         var shouldPersistVerifiedData = newIdentityStatus
                 is IdentityVerificationStatus.Approved
@@ -249,21 +258,21 @@ public sealed class IdentityVerificationService(
 
         if (shouldPersistVerifiedData && inlineGovernmentIdData is { Success: true })
         {
-            user.VerifiedFirstName = inlineGovernmentIdData.FirstName;
-            user.VerifiedMiddleName = inlineGovernmentIdData.MiddleName;
-            user.VerifiedLastName = inlineGovernmentIdData.LastName;
-            user.VerifiedBirthdate = inlineGovernmentIdData.Birthdate;
-            user.VerifiedLicenseState = NormalizeStateCode(inlineGovernmentIdData.LicenseState);
-            user.PersonaVerifiedAtUtc = DateTime.UtcNow;
+            iv.VerifiedFirstName = inlineGovernmentIdData.FirstName;
+            iv.VerifiedMiddleName = inlineGovernmentIdData.MiddleName;
+            iv.VerifiedLastName = inlineGovernmentIdData.LastName;
+            iv.VerifiedBirthdate = inlineGovernmentIdData.Birthdate;
+            iv.VerifiedLicenseState = NormalizeStateCode(inlineGovernmentIdData.LicenseState);
+            iv.PersonaVerifiedAtUtc = DateTime.UtcNow;
         }
 
         // Email-sign-in users have no display name when they sign up, so the welcome email
         // was deferred (see AuthService.VerifyEmailSignInAsync). Now that Persona has given
         // us a real name, send the welcome — once.
         if (user.WelcomeEmailSentAtUtc is null
-            && !string.IsNullOrWhiteSpace(user.VerifiedFirstName))
+            && !string.IsNullOrWhiteSpace(iv.VerifiedFirstName))
         {
-            await TrySendDeferredWelcomeAsync(user, cancellationToken);
+            await TrySendDeferredWelcomeAsync(user, iv.VerifiedFirstName, cancellationToken);
         }
 
         await identityVerificationRepository.SaveChangesAsync(cancellationToken);
@@ -272,7 +281,7 @@ public sealed class IdentityVerificationService(
             "Processed Persona webhook for inquiry {InquiryId}. User {UserId} now has identity status {IdentityVerificationStatus}.",
             inquiryId,
             user.Id,
-            user.IdentityVerificationStatus);
+            iv.Status);
     }
 
     public async Task<CreateInstantCriminalCheckResult> CreateInstantCriminalCheckAsync(
@@ -293,12 +302,14 @@ public sealed class IdentityVerificationService(
             };
         }
 
-        var hasExistingProfile = !string.IsNullOrWhiteSpace(user.CheckrProfileId);
+        var bc = user.BackgroundCheck;
+        var iv = user.IdentityVerification;
+        var hasExistingProfile = !string.IsNullOrWhiteSpace(bc?.CheckrProfileId);
         var trimmedPhone = string.IsNullOrWhiteSpace(input.PhoneNumber) ? null : input.PhoneNumber.Trim();
-        var effectivePhone = trimmedPhone ?? user.PhoneNumber;
+        var effectivePhone = trimmedPhone ?? user.Profile?.PhoneNumber;
 
         if (!hasExistingProfile
-            && (string.IsNullOrWhiteSpace(user.VerifiedFirstName) || string.IsNullOrWhiteSpace(user.VerifiedLastName)))
+            && (string.IsNullOrWhiteSpace(iv?.VerifiedFirstName) || string.IsNullOrWhiteSpace(iv.VerifiedLastName)))
         {
             logger.LogWarning(
                 "Checkr Trust instant criminal check requested for user {UserId} without verified identity.",
@@ -313,15 +324,15 @@ public sealed class IdentityVerificationService(
         var clientInput = hasExistingProfile
             ? new CreateInstantCriminalCheckInput
             {
-                ProfileId = user.CheckrProfileId
+                ProfileId = bc!.CheckrProfileId
             }
             : new CreateInstantCriminalCheckInput
             {
-                FirstName = user.VerifiedFirstName!,
-                MiddleName = user.VerifiedMiddleName,
-                LastName = user.VerifiedLastName!,
-                Birthdate = user.VerifiedBirthdate,
-                State = user.VerifiedLicenseState,
+                FirstName = iv!.VerifiedFirstName!,
+                MiddleName = iv.VerifiedMiddleName,
+                LastName = iv.VerifiedLastName!,
+                Birthdate = iv.VerifiedBirthdate,
+                State = iv.VerifiedLicenseState,
                 PhoneNumber = effectivePhone
             };
 
@@ -330,27 +341,29 @@ public sealed class IdentityVerificationService(
         if (!result.Success)
             return result;
 
+        var persistedBc = user.EnsureBackgroundCheck();
+
         if (!string.IsNullOrWhiteSpace(result.ProfileId))
-            user.CheckrProfileId = result.ProfileId;
+            persistedBc.CheckrProfileId = result.ProfileId;
 
         if (!string.IsNullOrWhiteSpace(result.CheckId))
-            user.CheckrLastCheckId = result.CheckId;
+            persistedBc.CheckrLastCheckId = result.CheckId;
 
-        user.CheckrLastCheckAtUtc = DateTime.UtcNow;
-        user.CheckrLastCheckHasPossibleMatches = result.HasPossibleMatches;
+        persistedBc.CheckrLastCheckAtUtc = DateTime.UtcNow;
+        persistedBc.CheckrLastCheckHasPossibleMatches = result.HasPossibleMatches;
 
         // Badge classification: Checkr's ruleset has already filtered out records the
         // ruleset considers acceptable (e.g. minor traffic). Anything that survived and
         // shows up in `results` is, by ruleset definition, disqualifying.
         // Expiry is informational — the frontend gates renewal UX on it; the backend
         // never auto-transitions the badge after this point. Renewal is a paid re-check.
-        user.BackgroundCheckBadge = result.HasPossibleMatches == true
+        persistedBc.Badge = result.HasPossibleMatches == true
             ? BackgroundCheckBadge.Denied
             : BackgroundCheckBadge.Approved;
-        user.BackgroundCheckBadgeExpiresAtUtc = DateTime.UtcNow.AddMonths(BackgroundCheckBadgeValidMonths);
+        persistedBc.BadgeExpiresAtUtc = DateTime.UtcNow.AddMonths(BackgroundCheckBadgeValidMonths);
 
         if (!string.IsNullOrWhiteSpace(trimmedPhone))
-            user.PhoneNumber = trimmedPhone;
+            user.EnsureProfile().PhoneNumber = trimmedPhone;
 
         await identityVerificationRepository.SaveChangesAsync(cancellationToken);
 
@@ -482,14 +495,14 @@ public sealed class IdentityVerificationService(
         return null;
     }
 
-    private async Task TrySendDeferredWelcomeAsync(Domain.Entities.User user, CancellationToken cancellationToken)
+    private async Task TrySendDeferredWelcomeAsync(User user, string? verifiedFirstName, CancellationToken cancellationToken)
     {
         try
         {
             // SendWelcomeAsync's second arg is treated as the "display name" — we pass the
             // verified first name directly. The sender's own first-token-extraction is a no-op
             // on a single token, so this renders as "Welcome to BuzzKeepr, {firstName}."
-            await welcomeEmailSender.SendWelcomeAsync(user.Email, user.VerifiedFirstName, cancellationToken);
+            await welcomeEmailSender.SendWelcomeAsync(user.Email, verifiedFirstName, cancellationToken);
             user.WelcomeEmailSentAtUtc = DateTime.UtcNow;
         }
         catch (Exception exception)

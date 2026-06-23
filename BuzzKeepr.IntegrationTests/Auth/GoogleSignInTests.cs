@@ -47,8 +47,9 @@ public sealed class GoogleSignInTests(PostgresFixture postgres) : IAsyncLifetime
 
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
-        var user = await dbContext.Users.AsNoTracking().FirstAsync(u => u.Email == email);
-        Assert.Equal(pictureUrl, user.ImageUrl);
+        var profile = await dbContext.UserProfiles.AsNoTracking()
+            .FirstAsync(p => p.User!.Email == email);
+        Assert.Equal(pictureUrl, profile.ImageUrl);
     }
 
     [Fact]

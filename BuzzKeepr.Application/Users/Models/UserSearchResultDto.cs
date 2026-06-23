@@ -19,4 +19,8 @@ public sealed class UserSearchResultDto
     public BackgroundCheckBadge BackgroundCheckBadge { get; init; } = BackgroundCheckBadge.None;
 
     public DateTime CreatedAtUtc { get; init; }
+
+    // Drives the frontend's "Add / Pending / Accept / Friends" button on each row. Defaults to
+    // None for anonymous searches (no viewer to compare against).
+    public ViewerFriendshipState ViewerFriendshipState { get; init; } = ViewerFriendshipState.None;
 }

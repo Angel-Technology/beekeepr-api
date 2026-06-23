@@ -1,8 +1,8 @@
 using System.Text.RegularExpressions;
 using BuzzKeepr.Application.Billing.Models;
-using BuzzKeepr.Application.IdentityVerification;
 using BuzzKeepr.Application.Users.Models;
 using BuzzKeepr.Domain.Entities;
+using BuzzKeepr.Domain.Enums;
 using Microsoft.Extensions.Logging;
 
 namespace BuzzKeepr.Application.Users;
@@ -58,16 +58,20 @@ public sealed class UserService(
         {
             Id = Guid.NewGuid(),
             Email = normalizedEmail,
-            DisplayName = string.IsNullOrWhiteSpace(input.DisplayName) ? null : input.DisplayName.Trim(),
             EmailVerified = false,
             CreatedAtUtc = DateTime.UtcNow
         };
+
+        if (!string.IsNullOrWhiteSpace(input.DisplayName))
+        {
+            user.EnsureProfile().DisplayName = input.DisplayName.Trim();
+        }
 
         await userRepository.AddAsync(user, cancellationToken);
 
         try
         {
-            await welcomeEmailSender.SendWelcomeAsync(user.Email, user.DisplayName, cancellationToken);
+            await welcomeEmailSender.SendWelcomeAsync(user.Email, user.Profile?.DisplayName, cancellationToken);
             user.WelcomeEmailSentAtUtc = DateTime.UtcNow;
             await userRepository.SaveChangesAsync(cancellationToken);
         }
@@ -160,21 +164,25 @@ public sealed class UserService(
             return new UpdateProfileResult { UserNotFound = true };
         }
 
+        var profile = user.EnsureProfile();
+
         if (input.Nickname is not null)
         {
-            user.Nickname = normalizedNickname;
+            profile.Nickname = normalizedNickname;
         }
 
         if (input.Handle is not null)
         {
             if (normalizedHandle is not null
-                && !string.Equals(user.Handle, normalizedHandle, StringComparison.Ordinal)
+                && !string.Equals(profile.Handle, normalizedHandle, StringComparison.Ordinal)
                 && await userRepository.HandleExistsAsync(normalizedHandle, userId, cancellationToken))
             {
                 return new UpdateProfileResult { HandleAlreadyTaken = true };
             }
-            user.Handle = normalizedHandle;
+            profile.Handle = normalizedHandle;
         }
+
+        profile.UpdatedAtUtc = DateTime.UtcNow;
 
         await userRepository.SaveChangesAsync(cancellationToken);
 
@@ -275,29 +283,33 @@ public sealed class UserService(
         };
     }
 
-    private static UserDto MapUser(User user)
+    internal static UserDto MapUser(User user)
     {
+        var profile = user.Profile;
+        var iv = user.IdentityVerification;
+        var bc = user.BackgroundCheck;
+
         return new UserDto
         {
             Id = user.Id,
             Email = user.Email,
-            DisplayName = user.DisplayName,
-            Nickname = user.Nickname,
-            Handle = user.Handle,
-            ImageUrl = user.ImageUrl,
+            DisplayName = profile?.DisplayName,
+            Nickname = profile?.Nickname,
+            Handle = profile?.Handle,
+            ImageUrl = profile?.ImageUrl,
+            PhoneNumber = profile?.PhoneNumber,
             EmailVerified = user.EmailVerified,
-            IdentityVerificationStatus = user.IdentityVerificationStatus,
-            PersonaInquiryId = user.PersonaInquiryId,
-            PersonaInquiryStatus = user.PersonaInquiryStatus,
-            VerifiedFirstName = user.VerifiedFirstName,
-            VerifiedMiddleName = user.VerifiedMiddleName,
-            VerifiedLastName = user.VerifiedLastName,
-            VerifiedBirthdate = user.VerifiedBirthdate,
-            VerifiedLicenseState = user.VerifiedLicenseState,
-            PhoneNumber = user.PhoneNumber,
-            PersonaVerifiedAtUtc = user.PersonaVerifiedAtUtc,
-            BackgroundCheckBadge = user.BackgroundCheckBadge,
-            BackgroundCheckBadgeExpiresAtUtc = user.BackgroundCheckBadgeExpiresAtUtc,
+            IdentityVerificationStatus = iv?.Status ?? IdentityVerificationStatus.NotStarted,
+            PersonaInquiryId = iv?.PersonaInquiryId,
+            PersonaInquiryStatus = iv?.PersonaInquiryStatus,
+            VerifiedFirstName = iv?.VerifiedFirstName,
+            VerifiedMiddleName = iv?.VerifiedMiddleName,
+            VerifiedLastName = iv?.VerifiedLastName,
+            VerifiedBirthdate = iv?.VerifiedBirthdate,
+            VerifiedLicenseState = iv?.VerifiedLicenseState,
+            PersonaVerifiedAtUtc = iv?.PersonaVerifiedAtUtc,
+            BackgroundCheckBadge = bc?.Badge ?? BackgroundCheckBadge.None,
+            BackgroundCheckBadgeExpiresAtUtc = bc?.BadgeExpiresAtUtc,
             TermsAcceptedAtUtc = user.TermsAcceptedAtUtc,
             Subscription = SubscriptionDto.FromUser(user),
             CreatedAtUtc = user.CreatedAtUtc,

@@ -14,6 +14,10 @@ public sealed class AuthRepository(BuzzKeeprDbContext dbContext) : IAuthReposito
         return await dbContext.Users
             .IgnoreQueryFilters()
             .Include(user => user.ExternalAccounts)
+            .Include(user => user.Profile)
+            .Include(user => user.IdentityVerification)
+            .Include(user => user.BackgroundCheck)
+            .Include(user => user.Subscription)
             .FirstOrDefaultAsync(user => user.Email == email, cancellationToken);
     }
 
@@ -21,9 +25,14 @@ public sealed class AuthRepository(BuzzKeeprDbContext dbContext) : IAuthReposito
     {
         // IgnoreQueryFilters so existing sessions keep resolving their user during the 72-hour
         // grace period — the client gets DeletedAtUtc on the user payload and can offer cancel.
+        // Sub-aggregates included so MapUser (which flattens them back) sees the full state
+        // without an N+1 trip per request.
         return await dbContext.Sessions
             .AsNoTracking()
-            .Include(session => session.User)
+            .Include(session => session.User).ThenInclude(user => user!.Profile)
+            .Include(session => session.User).ThenInclude(user => user!.IdentityVerification)
+            .Include(session => session.User).ThenInclude(user => user!.BackgroundCheck)
+            .Include(session => session.User).ThenInclude(user => user!.Subscription)
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(session => session.TokenHash == tokenHash
                 && session.RevokedAtUtc == null
@@ -68,7 +77,10 @@ public sealed class AuthRepository(BuzzKeeprDbContext dbContext) : IAuthReposito
         // navigation User; AuthService treats that as account recovery.
         return await dbContext.ExternalAccounts
             .IgnoreQueryFilters()
-            .Include(account => account.User)
+            .Include(account => account.User).ThenInclude(user => user!.Profile)
+            .Include(account => account.User).ThenInclude(user => user!.IdentityVerification)
+            .Include(account => account.User).ThenInclude(user => user!.BackgroundCheck)
+            .Include(account => account.User).ThenInclude(user => user!.Subscription)
             .FirstOrDefaultAsync(
                 account => account.Provider == provider && account.ProviderAccountId == providerAccountId,
                 cancellationToken);

@@ -110,6 +110,18 @@ public sealed class BuzzKeeprApiFactory(PostgresFixture postgres, string? appApi
         await dbContext.Sessions.ExecuteDeleteAsync();
         await dbContext.VerificationTokens.ExecuteDeleteAsync();
         await dbContext.ExternalAccounts.ExecuteDeleteAsync();
+        // Friendships/UserBlocks/UserFlags must clear before Users — the Restrict FK on the
+        // Blocked/FlaggedUser side blocks a Users wipe while child rows still reference them.
+        await dbContext.Friendships.ExecuteDeleteAsync();
+        await dbContext.UserBlocks.ExecuteDeleteAsync();
+        await dbContext.UserFlags.ExecuteDeleteAsync();
+        // Sub-aggregates wire to Users via Cascade so they'd clear with the Users.ExecuteDelete
+        // below, but explicit clears here keep the reset behavior deterministic if the FK is
+        // ever changed and let us see test-isolation bugs as test failures, not phantom rows.
+        await dbContext.UserSubscriptions.ExecuteDeleteAsync();
+        await dbContext.UserBackgroundChecks.ExecuteDeleteAsync();
+        await dbContext.UserIdentityVerifications.ExecuteDeleteAsync();
+        await dbContext.UserProfiles.ExecuteDeleteAsync();
         await dbContext.Users.ExecuteDeleteAsync();
     }
 }

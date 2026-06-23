@@ -149,14 +149,15 @@ public sealed class HandleAvailabilityTests(PostgresFixture postgres) : IAsyncLi
     {
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
-        dbContext.Users.Add(new User
+        var user = new User
         {
             Id = Guid.NewGuid(),
             Email = $"seed-{Guid.NewGuid():N}@buzzkeepr.test",
-            Handle = handle,
             EmailVerified = true,
             CreatedAtUtc = DateTime.UtcNow,
-        });
+        };
+        user.EnsureProfile().Handle = handle;
+        dbContext.Users.Add(user);
         await dbContext.SaveChangesAsync();
     }
 
@@ -164,8 +165,10 @@ public sealed class HandleAvailabilityTests(PostgresFixture postgres) : IAsyncLi
     {
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
-        var user = await dbContext.Users.FirstAsync(u => u.Id == userId);
-        user.Handle = handle;
+        var user = await dbContext.Users
+            .Include(u => u.Profile)
+            .FirstAsync(u => u.Id == userId);
+        user.EnsureProfile().Handle = handle;
         await dbContext.SaveChangesAsync();
     }
 

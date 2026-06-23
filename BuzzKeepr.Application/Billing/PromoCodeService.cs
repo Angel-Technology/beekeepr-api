@@ -1,4 +1,5 @@
 using BuzzKeepr.Application.Billing.Models;
+using BuzzKeepr.Domain.Entities;
 using Microsoft.Extensions.Logging;
 
 namespace BuzzKeepr.Application.Billing;
@@ -40,9 +41,10 @@ public sealed class PromoCodeService(
 
         // Frontend convention (see BillingService.TryResolveUserByAppUserIdAsync): the RevenueCat
         // appUserId equals our user.Id as a Guid string when the SDK hasn't seen this user yet.
-        var revenueCatAppUserId = string.IsNullOrWhiteSpace(user.RevenueCatAppUserId)
+        var existingRevenueCatAppUserId = user.Subscription?.RevenueCatAppUserId;
+        var revenueCatAppUserId = string.IsNullOrWhiteSpace(existingRevenueCatAppUserId)
             ? userId.ToString()
-            : user.RevenueCatAppUserId;
+            : existingRevenueCatAppUserId;
 
         // Lazy-create the RevenueCat subscriber. GET /v1/subscribers/{id} is idempotent and
         // creates the record if missing, which is required before the promotional-grant POST
@@ -56,9 +58,9 @@ public sealed class PromoCodeService(
         // (it short-circuits when RevenueCatAppUserId is null) and saves future flows from
         // having to re-resolve via the Guid-string fallback. Save outside of TryRedeemAsync's
         // transaction so the stamp persists even if redemption later rolls back.
-        if (string.IsNullOrWhiteSpace(user.RevenueCatAppUserId))
+        if (string.IsNullOrWhiteSpace(existingRevenueCatAppUserId))
         {
-            user.RevenueCatAppUserId = revenueCatAppUserId;
+            user.EnsureSubscription().RevenueCatAppUserId = revenueCatAppUserId;
             await billingRepository.SaveChangesAsync(cancellationToken);
         }
 

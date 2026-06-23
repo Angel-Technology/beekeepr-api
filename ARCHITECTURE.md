@@ -169,6 +169,60 @@ Current session access model:
 - frontend GraphQL queries such as `currentUser` should rely on that cookie-backed session state
 - email sign-in delivery uses Resend
 
+## Social Graph
+
+BuzzKeepr models user-to-user relationships as three discrete aggregates rather than a single "relationship" table. Each captures a distinct intent and has its own lifecycle.
+
+### Entities
+
+- `Friendship` — one row per ordered `(RequesterId, AddresseeId)` pair, with `Status` in `Pending` or `Accepted`. Accepting flips the status in place; declining or cancelling deletes the row.
+- `UserBlock` — asymmetric. `(BlockerId, BlockedId)` is unique. Blocking is one-way: blocker hides blocked, blocked also loses search visibility of blocker.
+- `UserFlag` — moderation signal. `(FlaggerId, FlaggedUserId)` is unique, so the flag count is *distinct flaggers*, not total flag events. Re-flagging is a no-op.
+
+### Invariants
+
+- **Flag implies block + unfriend.** Flagging a user atomically: inserts the `UserFlag`, removes any existing friendship between them, and creates a `UserBlock`. Re-flagging stays idempotent (already-blocked stays blocked, already-not-friends stays not-friends).
+- **Block removes friendship.** Blocking atomically deletes any existing friendship (pending or accepted) between the two users.
+- **Search hides blocked-either-direction.** A user the caller has blocked, or who has blocked the caller, is filtered out of `searchUsers`. Because flag implies block, flagged users disappear automatically.
+- **No auto-action on flag count.** Flag totals are stored but no threshold triggers suspension or hiding. Moderation is out-of-band by design.
+- **Block visibility is silent.** Neither blocking nor flagging notifies the target.
+
+### Cross-direction race handling
+
+The `Friendship` unique index is on `(RequesterId, AddresseeId)`, which prevents `A→B` from being inserted twice but allows `A→B` and `B→A` to coexist briefly if both sides race-click "Add friend." `ConnectionsService.SendFriendRequestAsync` resolves this by looking up the friendship between the two users in either direction before inserting:
+
+- If a reverse pending row exists (`B→A` already there when `A` sends to `B`), it auto-accepts — both sides clearly want the connection.
+- If a same-direction row exists (pending or accepted), the call is an idempotent no-op.
+
+### Block-state non-disclosure
+
+`SendFriendRequestAsync` distinguishes `BlockedByCaller`, `BlockedByTarget`, and `TargetNotFound` flags internally. The GraphQL mutation maps `BlockedByCaller` to an actionable error ("Unblock this user before sending a friend request.") but collapses `BlockedByTarget` and `TargetNotFound` to the same generic copy — `"Unable to send friend request."` — so the caller cannot probe whether a specific user has blocked them or whether the user exists at all.
+
+### Search result annotation
+
+Every row returned from `searchUsers` carries a `ViewerFriendshipState` field — one of `None`, `RequestSent`, `RequestReceived`, `Friends` — relative to the authenticated viewer. The projection is computed in SQL via three `EXISTS` subqueries hitting the `(RequesterId, Status)` / `(AddresseeId, Status)` helper indexes, so it adds bounded per-row cost at typeahead page sizes. The frontend uses this to choose between the Add / Pending / Accept / Friends button without a second round-trip.
+
+### Soft-delete behavior
+
+Users use `DeletedAtUtc` + a global query filter for soft-delete with a 72-hour grace period. Friendship/block/flag rows are *not* deleted on soft-delete — they remain so a cancelled deletion restores the social graph intact. Joining these aggregates through `dbContext.Users` (which applies the global filter) naturally hides soft-deleted users from friend lists and search results during the grace window. Hard delete cascades through the `Requester`/`Addressee`/`Blocker`/`Flagger` FKs; the `Blocked`/`FlaggedUser` FKs are `Restrict` to avoid Postgres' "multiple cascade paths through the same User row" error, so child rows must be cleared before a hard purge (which the deletion sweeper handles).
+
+### Current API surface
+
+Mutations (all require an authenticated session):
+
+- `sendFriendRequest`, `acceptFriendRequest`, `declineFriendRequest`, `cancelFriendRequest`
+- `removeFriend`
+- `blockUser`, `unblockUser`
+- `flagUser`
+
+Queries (all cursor-paginated via `[UsePaging]`):
+
+- `friends`, `incomingFriendRequests`, `outgoingFriendRequests`, `blockedUsers`
+
+### Deferred
+
+Notifications for incoming friend requests (GraphQL subscriptions and/or APNs/FCM push) are intentionally not yet implemented. The frontend polls `incomingFriendRequests` until this is revisited.
+
 ## Logging Strategy
 
 Logging is a cross-cutting concern, not a standalone architecture layer.
@@ -235,3 +289,14 @@ Accepted auth persistence shape:
 - Add `VerificationTokens` for passwordless sign-in and email verification
 - Keep GraphQL-specific input and payload models in `Presentation`
 - Keep application use-case input and output models in `Application`
+
+### 2026-06-20
+
+Accepted social graph shape:
+
+- Model friends, blocks, and flags as three distinct entities (`Friendship`, `UserBlock`, `UserFlag`) rather than a unified relationship table — each captures different intent and has its own lifecycle
+- Flag is a one-click action (no reason field) and atomically implies unfriend + block
+- Search hides users blocked in either direction so blocking severs discoverability symmetrically
+- Block / flag state is non-disclosing: `BlockedByTarget` and `TargetNotFound` collapse to the same generic error in `sendFriendRequest`
+- No automatic action triggers on flag-count thresholds — moderation remains out-of-band
+- Notifications for incoming friend requests are deferred; the frontend polls `incomingFriendRequests` until subscriptions or push are added

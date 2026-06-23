@@ -11,6 +11,7 @@ public static class DependencyInjection
         services.AddScoped<Billing.IPromoCodeService, Billing.PromoCodeService>();
         services.AddScoped<IdentityVerification.IIdentityVerificationService, IdentityVerification.IdentityVerificationService>();
         services.AddScoped<Users.IUserService, Users.UserService>();
+        services.AddScoped<Connections.IConnectionsService, Connections.ConnectionsService>();
 
         return services;
     }

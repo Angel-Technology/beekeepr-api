@@ -50,10 +50,17 @@ public sealed class WelcomeEmailSweeperBackgroundService(
         var welcomeSender = scope.ServiceProvider.GetRequiredService<IWelcomeEmailSender>();
         var cutoffUtc = DateTime.UtcNow.Subtract(InlineSendGracePeriod);
 
+        // Eligibility: user has *some* name we can greet them by — either a self-supplied
+        // DisplayName (UserProfile) or a verified first name from Persona (UserIdentityVerification).
+        // Without that we'd render "Welcome to BuzzKeepr, there." — skip and let the sweeper
+        // pick them up on a future pass once they fill in a profile or finish verification.
         var pending = await dbContext.Users
             .Where(user => user.WelcomeEmailSentAtUtc == null
                 && user.CreatedAtUtc < cutoffUtc
-                && (user.DisplayName != null || user.VerifiedFirstName != null))
+                && ((user.Profile != null && user.Profile.DisplayName != null)
+                    || (user.IdentityVerification != null && user.IdentityVerification.VerifiedFirstName != null)))
+            .Include(user => user.Profile)
+            .Include(user => user.IdentityVerification)
             .OrderBy(user => user.CreatedAtUtc)
             .Take(BatchSize)
             .ToListAsync(cancellationToken);
@@ -66,7 +73,8 @@ public sealed class WelcomeEmailSweeperBackgroundService(
         {
             try
             {
-                await welcomeSender.SendWelcomeAsync(user.Email, user.DisplayName ?? user.VerifiedFirstName, cancellationToken);
+                var displayName = user.Profile?.DisplayName ?? user.IdentityVerification?.VerifiedFirstName;
+                await welcomeSender.SendWelcomeAsync(user.Email, displayName, cancellationToken);
                 user.WelcomeEmailSentAtUtc = DateTime.UtcNow;
                 sent++;
             }

@@ -1,6 +1,7 @@
 using BuzzKeepr.Application.Users;
 using BuzzKeepr.Application.Users.Models;
 using BuzzKeepr.Domain.Entities;
+using BuzzKeepr.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace BuzzKeepr.Infrastructure.Persistence.Repositories;
@@ -15,12 +16,20 @@ public sealed class UserRepository(BuzzKeeprDbContext dbContext) : IUserReposito
     {
         return await dbContext.Users
             .AsNoTracking()
+            .Include(user => user.Profile)
+            .Include(user => user.IdentityVerification)
+            .Include(user => user.BackgroundCheck)
+            .Include(user => user.Subscription)
             .FirstOrDefaultAsync(user => user.Id == id, cancellationToken);
     }
 
     public async Task<User?> GetByIdForUpdateAsync(Guid id, CancellationToken cancellationToken)
     {
         return await dbContext.Users
+            .Include(user => user.Profile)
+            .Include(user => user.IdentityVerification)
+            .Include(user => user.BackgroundCheck)
+            .Include(user => user.Subscription)
             .FirstOrDefaultAsync(user => user.Id == id, cancellationToken);
     }
 
@@ -28,6 +37,10 @@ public sealed class UserRepository(BuzzKeeprDbContext dbContext) : IUserReposito
     {
         return await dbContext.Users
             .IgnoreQueryFilters()
+            .Include(user => user.Profile)
+            .Include(user => user.IdentityVerification)
+            .Include(user => user.BackgroundCheck)
+            .Include(user => user.Subscription)
             .FirstOrDefaultAsync(user => user.Id == id, cancellationToken);
     }
 
@@ -43,43 +56,77 @@ public sealed class UserRepository(BuzzKeeprDbContext dbContext) : IUserReposito
 
     public async Task<bool> HandleExistsAsync(string handle, Guid? excludeUserId, CancellationToken cancellationToken)
     {
-        return await dbContext.Users
+        // Handle now lives on UserProfile; the unique index travelled with it.
+        return await dbContext.UserProfiles
             .AsNoTracking()
-            .IgnoreQueryFilters()
-            .AnyAsync(user => user.Handle == handle && (excludeUserId == null || user.Id != excludeUserId), cancellationToken);
+            .AnyAsync(profile => profile.Handle == handle
+                && (excludeUserId == null || profile.UserId != excludeUserId), cancellationToken);
     }
 
     public IQueryable<UserSearchResultDto> Search(string normalizedQuery, Guid? excludeUserId)
     {
         var prefixPattern = normalizedQuery + "%";
 
-        // Soft-deleted rows are filtered by the global query filter on the User entity, so they're
-        // excluded here automatically. Ranking is computed in SQL so [UsePaging] can do LIMIT/OFFSET
-        // on the already-ordered, already-projected query.
-        return dbContext.Users
-            .AsNoTracking()
-            .Where(user => excludeUserId == null || user.Id != excludeUserId)
-            .Where(user =>
-                (user.Handle != null && (user.Handle == normalizedQuery || EF.Functions.ILike(user.Handle, prefixPattern)))
-                || (user.Nickname != null && EF.Functions.TrigramsSimilarity(user.Nickname, normalizedQuery) >= TrigramSimilarityFloor)
-                || (user.DisplayName != null && EF.Functions.TrigramsSimilarity(user.DisplayName, normalizedQuery) >= TrigramSimilarityFloor))
-            .OrderBy(user =>
-                user.Handle == normalizedQuery ? 0 :
-                user.Handle != null && EF.Functions.ILike(user.Handle, prefixPattern) ? 1 :
+        // Search now drives off UserProfiles — that's where Handle/Nickname/DisplayName/ImageUrl
+        // live. Joining Users (which carries the soft-delete query filter) excludes profiles
+        // belonging to soft-deleted accounts without an explicit nav check.
+        var profilesWithUsers =
+            from profile in dbContext.UserProfiles.AsNoTracking()
+            join user in dbContext.Users.AsNoTracking() on profile.UserId equals user.Id
+            select new { Profile = profile, User = user };
+
+        return profilesWithUsers
+            .Where(row => excludeUserId == null || row.User.Id != excludeUserId)
+            // Hide users involved in a block in either direction with the viewer. Flag implies block
+            // (see ConnectionsService.FlagUserAsync), so flagged users also drop out here.
+            .Where(row => excludeUserId == null
+                || !dbContext.UserBlocks.Any(block =>
+                    (block.BlockerId == excludeUserId && block.BlockedId == row.User.Id)
+                    || (block.BlockerId == row.User.Id && block.BlockedId == excludeUserId)))
+            .Where(row =>
+                (row.Profile.Handle != null && (row.Profile.Handle == normalizedQuery || EF.Functions.ILike(row.Profile.Handle, prefixPattern)))
+                || (row.Profile.Nickname != null && EF.Functions.TrigramsSimilarity(row.Profile.Nickname, normalizedQuery) >= TrigramSimilarityFloor)
+                || (row.Profile.DisplayName != null && EF.Functions.TrigramsSimilarity(row.Profile.DisplayName, normalizedQuery) >= TrigramSimilarityFloor))
+            .OrderBy(row =>
+                row.Profile.Handle == normalizedQuery ? 0 :
+                row.Profile.Handle != null && EF.Functions.ILike(row.Profile.Handle, prefixPattern) ? 1 :
                 2)
-            .ThenByDescending(user =>
-                (user.Nickname != null ? EF.Functions.TrigramsSimilarity(user.Nickname, normalizedQuery) : 0d)
-                + (user.DisplayName != null ? EF.Functions.TrigramsSimilarity(user.DisplayName, normalizedQuery) : 0d))
-            .ThenBy(user => user.Id) // stable tiebreaker so cursor pagination doesn't skip/duplicate
-            .Select(user => new UserSearchResultDto
+            .ThenByDescending(row =>
+                (row.Profile.Nickname != null ? EF.Functions.TrigramsSimilarity(row.Profile.Nickname, normalizedQuery) : 0d)
+                + (row.Profile.DisplayName != null ? EF.Functions.TrigramsSimilarity(row.Profile.DisplayName, normalizedQuery) : 0d))
+            .ThenBy(row => row.User.Id) // stable tiebreaker so cursor pagination doesn't skip/duplicate
+            .Select(row => new UserSearchResultDto
             {
-                Id = user.Id,
-                Handle = user.Handle,
-                Nickname = user.Nickname,
-                DisplayName = user.DisplayName,
-                ImageUrl = user.ImageUrl,
-                BackgroundCheckBadge = user.BackgroundCheckBadge,
-                CreatedAtUtc = user.CreatedAtUtc,
+                Id = row.User.Id,
+                Handle = row.Profile.Handle,
+                Nickname = row.Profile.Nickname,
+                DisplayName = row.Profile.DisplayName,
+                ImageUrl = row.Profile.ImageUrl,
+                BackgroundCheckBadge = dbContext.UserBackgroundChecks
+                    .Where(bc => bc.UserId == row.User.Id)
+                    .Select(bc => bc.Badge)
+                    .FirstOrDefault(),
+                CreatedAtUtc = row.User.CreatedAtUtc,
+                // Three EXISTS subqueries — each hits an indexed (RequesterId,Status) /
+                // (AddresseeId,Status) lookup so the per-row cost is small at typeahead page sizes.
+                ViewerFriendshipState = excludeUserId == null
+                    ? ViewerFriendshipState.None
+                    : dbContext.Friendships.Any(friendship =>
+                        ((friendship.RequesterId == excludeUserId && friendship.AddresseeId == row.User.Id)
+                         || (friendship.RequesterId == row.User.Id && friendship.AddresseeId == excludeUserId))
+                        && friendship.Status == FriendshipStatus.Accepted)
+                        ? ViewerFriendshipState.Friends
+                        : dbContext.Friendships.Any(friendship =>
+                            friendship.RequesterId == excludeUserId
+                            && friendship.AddresseeId == row.User.Id
+                            && friendship.Status == FriendshipStatus.Pending)
+                            ? ViewerFriendshipState.RequestSent
+                            : dbContext.Friendships.Any(friendship =>
+                                friendship.RequesterId == row.User.Id
+                                && friendship.AddresseeId == excludeUserId
+                                && friendship.Status == FriendshipStatus.Pending)
+                                ? ViewerFriendshipState.RequestReceived
+                                : ViewerFriendshipState.None,
             });
     }
 
