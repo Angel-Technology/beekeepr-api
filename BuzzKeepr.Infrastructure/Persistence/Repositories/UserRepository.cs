@@ -110,6 +110,62 @@ public sealed class UserRepository(BuzzKeeprDbContext dbContext) : IUserReposito
                     .Where(bc => bc.UserId == row.User.Id)
                     .Select(bc => bc.Badge)
                     .FirstOrDefault(),
+                BackgroundCheckBadgeExpiresAtUtc = dbContext.UserBackgroundChecks
+                    .Where(bc => bc.UserId == row.User.Id)
+                    .Select(bc => bc.BadgeExpiresAtUtc)
+                    .FirstOrDefault(),
+                CheckrLastCheckAtUtc = dbContext.UserBackgroundChecks
+                    .Where(bc => bc.UserId == row.User.Id)
+                    .Select(bc => bc.CheckrLastCheckAtUtc)
+                    .FirstOrDefault(),
+                ProfileVisibility = row.Profile.ProfileVisibility,
+                ContactVisibility = row.Profile.ContactVisibility,
+                // Contact fields gated: Public → always; ConnectionsOnly → only if viewer is an
+                // accepted friend; Private → null. Each field re-checks visibility independently —
+                // EF translates to a CASE per field, but the friend-EXISTS subquery hits the
+                // (RequesterId,Status)/(AddresseeId,Status) indexes so each evaluation is cheap.
+                PhoneNumber = row.Profile.ContactVisibility == ContactVisibility.Public
+                    || (row.Profile.ContactVisibility == ContactVisibility.ConnectionsOnly
+                        && excludeUserId != null
+                        && dbContext.Friendships.Any(f => f.Status == FriendshipStatus.Accepted
+                            && ((f.RequesterId == excludeUserId && f.AddresseeId == row.User.Id)
+                                || (f.RequesterId == row.User.Id && f.AddresseeId == excludeUserId))))
+                    ? row.Profile.PhoneNumber : null,
+                GoogleVoicePhone = row.Profile.ContactVisibility == ContactVisibility.Public
+                    || (row.Profile.ContactVisibility == ContactVisibility.ConnectionsOnly
+                        && excludeUserId != null
+                        && dbContext.Friendships.Any(f => f.Status == FriendshipStatus.Accepted
+                            && ((f.RequesterId == excludeUserId && f.AddresseeId == row.User.Id)
+                                || (f.RequesterId == row.User.Id && f.AddresseeId == excludeUserId))))
+                    ? row.Profile.GoogleVoicePhone : null,
+                WhatsAppPhone = row.Profile.ContactVisibility == ContactVisibility.Public
+                    || (row.Profile.ContactVisibility == ContactVisibility.ConnectionsOnly
+                        && excludeUserId != null
+                        && dbContext.Friendships.Any(f => f.Status == FriendshipStatus.Accepted
+                            && ((f.RequesterId == excludeUserId && f.AddresseeId == row.User.Id)
+                                || (f.RequesterId == row.User.Id && f.AddresseeId == excludeUserId))))
+                    ? row.Profile.WhatsAppPhone : null,
+                InstagramHandle = row.Profile.ContactVisibility == ContactVisibility.Public
+                    || (row.Profile.ContactVisibility == ContactVisibility.ConnectionsOnly
+                        && excludeUserId != null
+                        && dbContext.Friendships.Any(f => f.Status == FriendshipStatus.Accepted
+                            && ((f.RequesterId == excludeUserId && f.AddresseeId == row.User.Id)
+                                || (f.RequesterId == row.User.Id && f.AddresseeId == excludeUserId))))
+                    ? row.Profile.InstagramHandle : null,
+                TelegramHandle = row.Profile.ContactVisibility == ContactVisibility.Public
+                    || (row.Profile.ContactVisibility == ContactVisibility.ConnectionsOnly
+                        && excludeUserId != null
+                        && dbContext.Friendships.Any(f => f.Status == FriendshipStatus.Accepted
+                            && ((f.RequesterId == excludeUserId && f.AddresseeId == row.User.Id)
+                                || (f.RequesterId == row.User.Id && f.AddresseeId == excludeUserId))))
+                    ? row.Profile.TelegramHandle : null,
+                SignalPhone = row.Profile.ContactVisibility == ContactVisibility.Public
+                    || (row.Profile.ContactVisibility == ContactVisibility.ConnectionsOnly
+                        && excludeUserId != null
+                        && dbContext.Friendships.Any(f => f.Status == FriendshipStatus.Accepted
+                            && ((f.RequesterId == excludeUserId && f.AddresseeId == row.User.Id)
+                                || (f.RequesterId == row.User.Id && f.AddresseeId == excludeUserId))))
+                    ? row.Profile.SignalPhone : null,
                 CreatedAtUtc = row.User.CreatedAtUtc,
                 // Three EXISTS subqueries — each hits an indexed (RequesterId,Status) /
                 // (AddresseeId,Status) lookup so the per-row cost is small at typeahead page sizes.

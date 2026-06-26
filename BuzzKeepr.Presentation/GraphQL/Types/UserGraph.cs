@@ -34,6 +34,7 @@ public sealed class UserGraph
         PersonaVerifiedAtUtc = user.PersonaVerifiedAtUtc,
         BackgroundCheckBadge = user.BackgroundCheckBadge,
         BackgroundCheckBadgeExpiresAtUtc = user.BackgroundCheckBadgeExpiresAtUtc,
+        CheckrLastCheckAtUtc = user.CheckrLastCheckAtUtc,
         TermsAcceptedAtUtc = user.TermsAcceptedAtUtc,
         Subscription = user.Subscription,
         CreatedAtUtc = user.CreatedAtUtc,
@@ -91,6 +92,8 @@ public sealed class UserGraph
     public BackgroundCheckBadge BackgroundCheckBadge { get; init; } = BackgroundCheckBadge.None;
 
     public DateTime? BackgroundCheckBadgeExpiresAtUtc { get; init; }
+
+    public DateTime? CheckrLastCheckAtUtc { get; init; }
 
     public DateTime? TermsAcceptedAtUtc { get; init; }
 

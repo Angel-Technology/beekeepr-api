@@ -564,6 +564,7 @@ public sealed class AuthService(
             PersonaVerifiedAtUtc = iv?.PersonaVerifiedAtUtc,
             BackgroundCheckBadge = bc?.Badge ?? BackgroundCheckBadge.None,
             BackgroundCheckBadgeExpiresAtUtc = bc?.BadgeExpiresAtUtc,
+            CheckrLastCheckAtUtc = bc?.CheckrLastCheckAtUtc,
             TermsAcceptedAtUtc = user.TermsAcceptedAtUtc,
             Subscription = SubscriptionDto.FromUser(user),
             CreatedAtUtc = user.CreatedAtUtc,

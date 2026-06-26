@@ -43,6 +43,10 @@ public sealed class UserDto
 
     public DateTime? BackgroundCheckBadgeExpiresAtUtc { get; init; }
 
+    // When the most recent Checkr inquiry ran. Frontend uses this with BadgeExpiresAtUtc to
+    // drive the "your check is X days old, renews in Y" copy on the profile/verification screens.
+    public DateTime? CheckrLastCheckAtUtc { get; init; }
+
     public DateTime? TermsAcceptedAtUtc { get; init; }
 
     public string? GoogleVoicePhone { get; init; }

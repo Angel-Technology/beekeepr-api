@@ -13,6 +13,8 @@ public sealed class UpdateProfileInput
 
     public string? DisplayName { get; init; }
 
+    public string? ImageUrl { get; init; }
+
     public string? PhoneNumber { get; init; }
 
     public string? GoogleVoicePhone { get; init; }

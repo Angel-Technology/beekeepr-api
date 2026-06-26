@@ -144,6 +144,71 @@ public sealed class UserSearchTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SearchUsers_PublicContact_VisibleToStranger()
+    {
+        // ContactVisibility=Public means anyone (including strangers) sees the contact fields.
+        var (callerToken, _) = await SignInAsync();
+        var targetId = await SeedUserAsync(handle: "publicpat", displayName: null, nickname: null);
+        await SetContactAsync(targetId, ContactVisibility.Public,
+            phone: "+14155552671", instagram: "patinsta");
+
+        var graphql = AuthenticatedClient(callerToken);
+
+        var response = await graphql.SendAsync<SearchUsersContactData>(
+            "query { searchUsers(query: \"publicpat\", first: 5) { edges { node { id phoneNumber instagramHandle contactVisibility } } } }");
+        var node = response.RequireData().SearchUsers.Edges.Single(e => e.Node.Id == targetId).Node;
+        Assert.Equal("+14155552671", node.PhoneNumber);
+        Assert.Equal("patinsta", node.InstagramHandle);
+        Assert.Equal("PUBLIC", node.ContactVisibility);
+    }
+
+    [Fact]
+    public async Task SearchUsers_ConnectionsOnlyContact_HiddenFromStranger_VisibleToFriend()
+    {
+        // ContactVisibility=ConnectionsOnly hides contact from non-friends, exposes to friends.
+        var (callerToken, callerId) = await SignInAsync();
+        var (_, friendToken, friendId) = await SignInAsync2();
+        var targetId = await SeedUserAsync(handle: "convocon", displayName: null, nickname: null);
+        await SetContactAsync(targetId, ContactVisibility.ConnectionsOnly,
+            phone: "+14155551111", instagram: "coninsta");
+
+        // Stranger view — caller is not friends with target.
+        var strangerResponse = await AuthenticatedClient(callerToken).SendAsync<SearchUsersContactData>(
+            "query { searchUsers(query: \"convocon\", first: 5) { edges { node { id phoneNumber instagramHandle contactVisibility } } } }");
+        var strangerNode = strangerResponse.RequireData().SearchUsers.Edges.Single(e => e.Node.Id == targetId).Node;
+        Assert.Null(strangerNode.PhoneNumber);
+        Assert.Null(strangerNode.InstagramHandle);
+        Assert.Equal("CONNECTIONS_ONLY", strangerNode.ContactVisibility);
+
+        // Friend view — establish friendship between friendId and target, then search as friend.
+        await SeedAcceptedFriendshipAsync(friendId, targetId);
+        var friendResponse = await AuthenticatedClient(friendToken).SendAsync<SearchUsersContactData>(
+            "query { searchUsers(query: \"convocon\", first: 5) { edges { node { id phoneNumber instagramHandle contactVisibility } } } }");
+        var friendNode = friendResponse.RequireData().SearchUsers.Edges.Single(e => e.Node.Id == targetId).Node;
+        Assert.Equal("+14155551111", friendNode.PhoneNumber);
+        Assert.Equal("coninsta", friendNode.InstagramHandle);
+    }
+
+    [Fact]
+    public async Task SearchUsers_PrivateContact_HiddenFromEveryone()
+    {
+        // Even friends shouldn't see contact when visibility is Private — strict gating per
+        // the visibility model. Verifies the "Private always hides" rule end-to-end.
+        var (callerToken, callerId) = await SignInAsync();
+        var targetId = await SeedUserAsync(handle: "privpriv", displayName: null, nickname: null);
+        await SetContactAsync(targetId, ContactVisibility.Private,
+            phone: "+14155559999", instagram: "privinsta");
+        await SeedAcceptedFriendshipAsync(callerId, targetId);
+
+        var response = await AuthenticatedClient(callerToken).SendAsync<SearchUsersContactData>(
+            "query { searchUsers(query: \"privpriv\", first: 5) { edges { node { id phoneNumber instagramHandle contactVisibility } } } }");
+        var node = response.RequireData().SearchUsers.Edges.Single(e => e.Node.Id == targetId).Node;
+        Assert.Null(node.PhoneNumber);
+        Assert.Null(node.InstagramHandle);
+        Assert.Equal("PRIVATE", node.ContactVisibility);
+    }
+
+    [Fact]
     public async Task SearchUsers_WithoutSessionReturnsEmpty()
     {
         await SeedUserAsync(handle: "anyone", displayName: null, nickname: null);
@@ -249,11 +314,73 @@ public sealed class UserSearchTests(PostgresFixture postgres) : IAsyncLifetime
         return (data.Session!.Token, data.User!.Id);
     }
 
+    // Convenience for tests that need a second authenticated user. Returns (email, token, userId).
+    private async Task<(string Email, string Token, Guid UserId)> SignInAsync2()
+    {
+        var email = $"search2-{Guid.NewGuid():N}@buzzkeepr.test";
+        var http = factory.CreateClient();
+        var graphql = new GraphQLClient(http);
+
+        await graphql.SendAsync<JsonElement>(
+            "mutation($input: RequestEmailSignInInput!) { requestEmailSignIn(input: $input) { success } }",
+            new { input = new { email } });
+        var code = factory.FakeEmailSender.RequireLatestFor(email).Code;
+        var verify = await graphql.SendAsync<VerifyData>(
+            "mutation($input: VerifyEmailSignInInput!) { verifyEmailSignIn(input: $input) { user { id } session { token } } }",
+            new { input = new { email, code } });
+        var data = verify.RequireData().VerifyEmailSignIn;
+        return (email, data.Session!.Token, data.User!.Id);
+    }
+
+    private async Task SetContactAsync(Guid userId, ContactVisibility visibility, string? phone = null, string? instagram = null)
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
+        var profile = await dbContext.UserProfiles.FirstOrDefaultAsync(p => p.UserId == userId);
+        if (profile is null)
+        {
+            profile = new UserProfile
+            {
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                CreatedAtUtc = DateTime.UtcNow
+            };
+            dbContext.UserProfiles.Add(profile);
+        }
+        profile.ContactVisibility = visibility;
+        if (phone is not null) profile.PhoneNumber = phone;
+        if (instagram is not null) profile.InstagramHandle = instagram;
+        await dbContext.SaveChangesAsync();
+    }
+
+    private async Task SeedAcceptedFriendshipAsync(Guid userA, Guid userB)
+    {
+        // Direct DB insert avoids running through the GraphQL flow — these tests don't care
+        // about the request/accept dance, just that the friendship row exists.
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
+        dbContext.Friendships.Add(new Friendship
+        {
+            Id = Guid.NewGuid(),
+            RequesterId = userA,
+            AddresseeId = userB,
+            Status = FriendshipStatus.Accepted,
+            CreatedAtUtc = DateTime.UtcNow,
+            RespondedAtUtc = DateTime.UtcNow
+        });
+        await dbContext.SaveChangesAsync();
+    }
+
     private sealed record SearchUsersData(SearchUsersConnection SearchUsers);
     private sealed record SearchUsersConnection(List<SearchUsersEdge> Edges, SearchUsersPageInfo PageInfo);
     private sealed record SearchUsersEdge(SearchUsersNode Node, string? Cursor);
     private sealed record SearchUsersNode(Guid Id, string? Handle, string? Nickname, string? DisplayName);
     private sealed record SearchUsersPageInfo(bool HasNextPage, string? EndCursor);
+
+    private sealed record SearchUsersContactData(SearchUsersContactConnection SearchUsers);
+    private sealed record SearchUsersContactConnection(List<SearchUsersContactEdge> Edges);
+    private sealed record SearchUsersContactEdge(SearchUsersContactNode Node);
+    private sealed record SearchUsersContactNode(Guid Id, string? PhoneNumber, string? InstagramHandle, string ContactVisibility);
 
     private sealed record VerifyData(VerifyPayload VerifyEmailSignIn);
     private sealed record VerifyPayload(VerifyUser? User, VerifySession? Session);

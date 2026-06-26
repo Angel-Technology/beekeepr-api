@@ -353,6 +353,7 @@ public sealed class UserMutations
                 Nickname = input.Nickname,
                 Handle = input.Handle,
                 DisplayName = input.DisplayName,
+                ImageUrl = input.ImageUrl,
                 PhoneNumber = input.PhoneNumber,
                 GoogleVoicePhone = input.GoogleVoicePhone,
                 WhatsAppPhone = input.WhatsAppPhone,
@@ -375,6 +376,9 @@ public sealed class UserMutations
 
         if (result.DisplayNameTooLong)
             return new UpdateProfilePayload { Error = "Display name must be 200 characters or fewer." };
+
+        if (result.ImageUrlTooLong)
+            return new UpdateProfilePayload { Error = "Image URL must be 2048 characters or fewer." };
 
         if (result.PhoneNumberInvalid)
             return new UpdateProfilePayload { Error = "Phone number must be 32 characters or fewer." };

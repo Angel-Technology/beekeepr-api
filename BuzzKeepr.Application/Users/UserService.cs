@@ -16,6 +16,9 @@ public sealed class UserService(
     private const int DisplayNameMaxLength = 200;
     private const int PhoneMaxLength = 32;
     private const int SocialHandleMaxLength = 64;
+    // Matches the column cap on UserProfile.ImageUrl. Frontend uploads the avatar to its own
+    // storage and hands us the resulting URL — backend just length-bounds and stores the string.
+    private const int ImageUrlMaxLength = 2048;
 
     // Two chars is enough for prefix lookups (e.g. "sa") while still blocking single-char queries
     // that would behave like a full enumeration of the user table.
@@ -148,6 +151,9 @@ public sealed class UserService(
         if (!TryNormalizeOptional(input.DisplayName, DisplayNameMaxLength, out var normalizedDisplayName))
             return new UpdateProfileResult { DisplayNameTooLong = true };
 
+        if (!TryNormalizeOptional(input.ImageUrl, ImageUrlMaxLength, out var normalizedImageUrl))
+            return new UpdateProfileResult { ImageUrlTooLong = true };
+
         if (!TryNormalizeOptional(input.PhoneNumber, PhoneMaxLength, out var normalizedPhone)
             || !TryNormalizeOptional(input.GoogleVoicePhone, PhoneMaxLength, out var normalizedGoogleVoice)
             || !TryNormalizeOptional(input.WhatsAppPhone, PhoneMaxLength, out var normalizedWhatsApp)
@@ -192,6 +198,9 @@ public sealed class UserService(
 
         if (input.DisplayName is not null)
             profile.DisplayName = normalizedDisplayName;
+
+        if (input.ImageUrl is not null)
+            profile.ImageUrl = normalizedImageUrl;
 
         if (input.PhoneNumber is not null)
             profile.PhoneNumber = normalizedPhone;
@@ -367,6 +376,7 @@ public sealed class UserService(
             PersonaVerifiedAtUtc = iv?.PersonaVerifiedAtUtc,
             BackgroundCheckBadge = bc?.Badge ?? BackgroundCheckBadge.None,
             BackgroundCheckBadgeExpiresAtUtc = bc?.BadgeExpiresAtUtc,
+            CheckrLastCheckAtUtc = bc?.CheckrLastCheckAtUtc,
             TermsAcceptedAtUtc = user.TermsAcceptedAtUtc,
             Subscription = SubscriptionDto.FromUser(user),
             CreatedAtUtc = user.CreatedAtUtc,

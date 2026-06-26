@@ -117,25 +117,47 @@ public sealed class ConnectionsRepository(BuzzKeeprDbContext dbContext) : IConne
         }
     }
 
+    // Visibility model summary used by all four list projections below:
+    //   - viewerIsFriend is a compile-time constant per query (true on QueryFriends, false on
+    //     the other three) so SQL gets a simple `WHEN contact_visibility = 'Public' THEN x ELSE
+    //     NULL` per contact field — no EXISTS subquery needed for the friendship check.
+    //   - profile/bc are LEFT-joined; a missing row produces null, which the projection collapses
+    //     to default values (None badge, Public profile, Private contact, null contact fields).
+    //
+    // Each projection is inlined rather than extracted into a helper because EF Core can't
+    // translate method calls inside an IQueryable expression tree — the `new UserConnectionDto {
+    // ... }` literal must be visible to the translator.
+
     public IQueryable<UserConnectionDto> QueryFriends(Guid userId)
     {
-        // Two filtered halves joined to Users via inner-join — Users carries the soft-delete
-        // global filter, so deleted accounts disappear without an explicit null check. Profile +
-        // BackgroundCheck are left-joined (the sub-aggregates are created lazily, so absent rows
-        // are normal — they just project null/None). Union dedupes by row contents, but
-        // RequesterId/AddresseeId pairs are unique so dedupe is moot.
+        // Friends list: every row is an Accepted friendship, so Public + ConnectionsOnly contact
+        // emit; Private still hides (strict gating).
         var asRequester =
             from friendship in dbContext.Friendships.AsNoTracking()
             join other in dbContext.Users.AsNoTracking() on friendship.AddresseeId equals other.Id
+            join profileJoin in dbContext.UserProfiles.AsNoTracking() on other.Id equals profileJoin.UserId into profileLeft
+            from profile in profileLeft.DefaultIfEmpty()
+            join bcJoin in dbContext.UserBackgroundChecks.AsNoTracking() on other.Id equals bcJoin.UserId into bcLeft
+            from bc in bcLeft.DefaultIfEmpty()
             where friendship.Status == FriendshipStatus.Accepted && friendship.RequesterId == userId
             select new UserConnectionDto
             {
                 Id = other.Id,
-                Handle = dbContext.UserProfiles.Where(p => p.UserId == other.Id).Select(p => p.Handle).FirstOrDefault(),
-                Nickname = dbContext.UserProfiles.Where(p => p.UserId == other.Id).Select(p => p.Nickname).FirstOrDefault(),
-                DisplayName = dbContext.UserProfiles.Where(p => p.UserId == other.Id).Select(p => p.DisplayName).FirstOrDefault(),
-                ImageUrl = dbContext.UserProfiles.Where(p => p.UserId == other.Id).Select(p => p.ImageUrl).FirstOrDefault(),
-                BackgroundCheckBadge = dbContext.UserBackgroundChecks.Where(bc => bc.UserId == other.Id).Select(bc => bc.Badge).FirstOrDefault(),
+                Handle = profile != null ? profile.Handle : null,
+                Nickname = profile != null ? profile.Nickname : null,
+                DisplayName = profile != null ? profile.DisplayName : null,
+                ImageUrl = profile != null ? profile.ImageUrl : null,
+                BackgroundCheckBadge = bc != null ? bc.Badge : BackgroundCheckBadge.None,
+                BackgroundCheckBadgeExpiresAtUtc = bc != null ? bc.BadgeExpiresAtUtc : null,
+                CheckrLastCheckAtUtc = bc != null ? bc.CheckrLastCheckAtUtc : null,
+                ProfileVisibility = profile != null ? profile.ProfileVisibility : ProfileVisibility.Public,
+                ContactVisibility = profile != null ? profile.ContactVisibility : ContactVisibility.Private,
+                PhoneNumber = profile != null && profile.ContactVisibility != ContactVisibility.Private ? profile.PhoneNumber : null,
+                GoogleVoicePhone = profile != null && profile.ContactVisibility != ContactVisibility.Private ? profile.GoogleVoicePhone : null,
+                WhatsAppPhone = profile != null && profile.ContactVisibility != ContactVisibility.Private ? profile.WhatsAppPhone : null,
+                InstagramHandle = profile != null && profile.ContactVisibility != ContactVisibility.Private ? profile.InstagramHandle : null,
+                TelegramHandle = profile != null && profile.ContactVisibility != ContactVisibility.Private ? profile.TelegramHandle : null,
+                SignalPhone = profile != null && profile.ContactVisibility != ContactVisibility.Private ? profile.SignalPhone : null,
                 UserCreatedAtUtc = other.CreatedAtUtc,
                 ConnectionCreatedAtUtc = friendship.CreatedAtUtc
             };
@@ -143,15 +165,29 @@ public sealed class ConnectionsRepository(BuzzKeeprDbContext dbContext) : IConne
         var asAddressee =
             from friendship in dbContext.Friendships.AsNoTracking()
             join other in dbContext.Users.AsNoTracking() on friendship.RequesterId equals other.Id
+            join profileJoin in dbContext.UserProfiles.AsNoTracking() on other.Id equals profileJoin.UserId into profileLeft
+            from profile in profileLeft.DefaultIfEmpty()
+            join bcJoin in dbContext.UserBackgroundChecks.AsNoTracking() on other.Id equals bcJoin.UserId into bcLeft
+            from bc in bcLeft.DefaultIfEmpty()
             where friendship.Status == FriendshipStatus.Accepted && friendship.AddresseeId == userId
             select new UserConnectionDto
             {
                 Id = other.Id,
-                Handle = dbContext.UserProfiles.Where(p => p.UserId == other.Id).Select(p => p.Handle).FirstOrDefault(),
-                Nickname = dbContext.UserProfiles.Where(p => p.UserId == other.Id).Select(p => p.Nickname).FirstOrDefault(),
-                DisplayName = dbContext.UserProfiles.Where(p => p.UserId == other.Id).Select(p => p.DisplayName).FirstOrDefault(),
-                ImageUrl = dbContext.UserProfiles.Where(p => p.UserId == other.Id).Select(p => p.ImageUrl).FirstOrDefault(),
-                BackgroundCheckBadge = dbContext.UserBackgroundChecks.Where(bc => bc.UserId == other.Id).Select(bc => bc.Badge).FirstOrDefault(),
+                Handle = profile != null ? profile.Handle : null,
+                Nickname = profile != null ? profile.Nickname : null,
+                DisplayName = profile != null ? profile.DisplayName : null,
+                ImageUrl = profile != null ? profile.ImageUrl : null,
+                BackgroundCheckBadge = bc != null ? bc.Badge : BackgroundCheckBadge.None,
+                BackgroundCheckBadgeExpiresAtUtc = bc != null ? bc.BadgeExpiresAtUtc : null,
+                CheckrLastCheckAtUtc = bc != null ? bc.CheckrLastCheckAtUtc : null,
+                ProfileVisibility = profile != null ? profile.ProfileVisibility : ProfileVisibility.Public,
+                ContactVisibility = profile != null ? profile.ContactVisibility : ContactVisibility.Private,
+                PhoneNumber = profile != null && profile.ContactVisibility != ContactVisibility.Private ? profile.PhoneNumber : null,
+                GoogleVoicePhone = profile != null && profile.ContactVisibility != ContactVisibility.Private ? profile.GoogleVoicePhone : null,
+                WhatsAppPhone = profile != null && profile.ContactVisibility != ContactVisibility.Private ? profile.WhatsAppPhone : null,
+                InstagramHandle = profile != null && profile.ContactVisibility != ContactVisibility.Private ? profile.InstagramHandle : null,
+                TelegramHandle = profile != null && profile.ContactVisibility != ContactVisibility.Private ? profile.TelegramHandle : null,
+                SignalPhone = profile != null && profile.ContactVisibility != ContactVisibility.Private ? profile.SignalPhone : null,
                 UserCreatedAtUtc = other.CreatedAtUtc,
                 ConnectionCreatedAtUtc = friendship.CreatedAtUtc
             };
@@ -163,18 +199,34 @@ public sealed class ConnectionsRepository(BuzzKeeprDbContext dbContext) : IConne
 
     public IQueryable<UserConnectionDto> QueryIncomingFriendRequests(Guid userId)
     {
+        // Pending requests aren't friendships, so ConnectionsOnly contact stays hidden —
+        // only Public emits.
         return from friendship in dbContext.Friendships.AsNoTracking()
                join requester in dbContext.Users.AsNoTracking() on friendship.RequesterId equals requester.Id
+               join profileJoin in dbContext.UserProfiles.AsNoTracking() on requester.Id equals profileJoin.UserId into profileLeft
+               from profile in profileLeft.DefaultIfEmpty()
+               join bcJoin in dbContext.UserBackgroundChecks.AsNoTracking() on requester.Id equals bcJoin.UserId into bcLeft
+               from bc in bcLeft.DefaultIfEmpty()
                where friendship.Status == FriendshipStatus.Pending && friendship.AddresseeId == userId
                orderby friendship.CreatedAtUtc descending, requester.Id
                select new UserConnectionDto
                {
                    Id = requester.Id,
-                   Handle = dbContext.UserProfiles.Where(p => p.UserId == requester.Id).Select(p => p.Handle).FirstOrDefault(),
-                   Nickname = dbContext.UserProfiles.Where(p => p.UserId == requester.Id).Select(p => p.Nickname).FirstOrDefault(),
-                   DisplayName = dbContext.UserProfiles.Where(p => p.UserId == requester.Id).Select(p => p.DisplayName).FirstOrDefault(),
-                   ImageUrl = dbContext.UserProfiles.Where(p => p.UserId == requester.Id).Select(p => p.ImageUrl).FirstOrDefault(),
-                   BackgroundCheckBadge = dbContext.UserBackgroundChecks.Where(bc => bc.UserId == requester.Id).Select(bc => bc.Badge).FirstOrDefault(),
+                   Handle = profile != null ? profile.Handle : null,
+                   Nickname = profile != null ? profile.Nickname : null,
+                   DisplayName = profile != null ? profile.DisplayName : null,
+                   ImageUrl = profile != null ? profile.ImageUrl : null,
+                   BackgroundCheckBadge = bc != null ? bc.Badge : BackgroundCheckBadge.None,
+                   BackgroundCheckBadgeExpiresAtUtc = bc != null ? bc.BadgeExpiresAtUtc : null,
+                   CheckrLastCheckAtUtc = bc != null ? bc.CheckrLastCheckAtUtc : null,
+                   ProfileVisibility = profile != null ? profile.ProfileVisibility : ProfileVisibility.Public,
+                   ContactVisibility = profile != null ? profile.ContactVisibility : ContactVisibility.Private,
+                   PhoneNumber = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.PhoneNumber : null,
+                   GoogleVoicePhone = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.GoogleVoicePhone : null,
+                   WhatsAppPhone = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.WhatsAppPhone : null,
+                   InstagramHandle = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.InstagramHandle : null,
+                   TelegramHandle = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.TelegramHandle : null,
+                   SignalPhone = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.SignalPhone : null,
                    UserCreatedAtUtc = requester.CreatedAtUtc,
                    ConnectionCreatedAtUtc = friendship.CreatedAtUtc
                };
@@ -184,16 +236,30 @@ public sealed class ConnectionsRepository(BuzzKeeprDbContext dbContext) : IConne
     {
         return from friendship in dbContext.Friendships.AsNoTracking()
                join addressee in dbContext.Users.AsNoTracking() on friendship.AddresseeId equals addressee.Id
+               join profileJoin in dbContext.UserProfiles.AsNoTracking() on addressee.Id equals profileJoin.UserId into profileLeft
+               from profile in profileLeft.DefaultIfEmpty()
+               join bcJoin in dbContext.UserBackgroundChecks.AsNoTracking() on addressee.Id equals bcJoin.UserId into bcLeft
+               from bc in bcLeft.DefaultIfEmpty()
                where friendship.Status == FriendshipStatus.Pending && friendship.RequesterId == userId
                orderby friendship.CreatedAtUtc descending, addressee.Id
                select new UserConnectionDto
                {
                    Id = addressee.Id,
-                   Handle = dbContext.UserProfiles.Where(p => p.UserId == addressee.Id).Select(p => p.Handle).FirstOrDefault(),
-                   Nickname = dbContext.UserProfiles.Where(p => p.UserId == addressee.Id).Select(p => p.Nickname).FirstOrDefault(),
-                   DisplayName = dbContext.UserProfiles.Where(p => p.UserId == addressee.Id).Select(p => p.DisplayName).FirstOrDefault(),
-                   ImageUrl = dbContext.UserProfiles.Where(p => p.UserId == addressee.Id).Select(p => p.ImageUrl).FirstOrDefault(),
-                   BackgroundCheckBadge = dbContext.UserBackgroundChecks.Where(bc => bc.UserId == addressee.Id).Select(bc => bc.Badge).FirstOrDefault(),
+                   Handle = profile != null ? profile.Handle : null,
+                   Nickname = profile != null ? profile.Nickname : null,
+                   DisplayName = profile != null ? profile.DisplayName : null,
+                   ImageUrl = profile != null ? profile.ImageUrl : null,
+                   BackgroundCheckBadge = bc != null ? bc.Badge : BackgroundCheckBadge.None,
+                   BackgroundCheckBadgeExpiresAtUtc = bc != null ? bc.BadgeExpiresAtUtc : null,
+                   CheckrLastCheckAtUtc = bc != null ? bc.CheckrLastCheckAtUtc : null,
+                   ProfileVisibility = profile != null ? profile.ProfileVisibility : ProfileVisibility.Public,
+                   ContactVisibility = profile != null ? profile.ContactVisibility : ContactVisibility.Private,
+                   PhoneNumber = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.PhoneNumber : null,
+                   GoogleVoicePhone = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.GoogleVoicePhone : null,
+                   WhatsAppPhone = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.WhatsAppPhone : null,
+                   InstagramHandle = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.InstagramHandle : null,
+                   TelegramHandle = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.TelegramHandle : null,
+                   SignalPhone = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.SignalPhone : null,
                    UserCreatedAtUtc = addressee.CreatedAtUtc,
                    ConnectionCreatedAtUtc = friendship.CreatedAtUtc
                };
@@ -201,18 +267,34 @@ public sealed class ConnectionsRepository(BuzzKeeprDbContext dbContext) : IConne
 
     public IQueryable<UserConnectionDto> QueryBlockedUsers(Guid userId)
     {
+        // Blocked users are never friends with the viewer (block removes any friendship), so
+        // ConnectionsOnly contact stays hidden — only Public emits.
         return from block in dbContext.UserBlocks.AsNoTracking()
                join blocked in dbContext.Users.AsNoTracking() on block.BlockedId equals blocked.Id
+               join profileJoin in dbContext.UserProfiles.AsNoTracking() on blocked.Id equals profileJoin.UserId into profileLeft
+               from profile in profileLeft.DefaultIfEmpty()
+               join bcJoin in dbContext.UserBackgroundChecks.AsNoTracking() on blocked.Id equals bcJoin.UserId into bcLeft
+               from bc in bcLeft.DefaultIfEmpty()
                where block.BlockerId == userId
                orderby block.CreatedAtUtc descending, blocked.Id
                select new UserConnectionDto
                {
                    Id = blocked.Id,
-                   Handle = dbContext.UserProfiles.Where(p => p.UserId == blocked.Id).Select(p => p.Handle).FirstOrDefault(),
-                   Nickname = dbContext.UserProfiles.Where(p => p.UserId == blocked.Id).Select(p => p.Nickname).FirstOrDefault(),
-                   DisplayName = dbContext.UserProfiles.Where(p => p.UserId == blocked.Id).Select(p => p.DisplayName).FirstOrDefault(),
-                   ImageUrl = dbContext.UserProfiles.Where(p => p.UserId == blocked.Id).Select(p => p.ImageUrl).FirstOrDefault(),
-                   BackgroundCheckBadge = dbContext.UserBackgroundChecks.Where(bc => bc.UserId == blocked.Id).Select(bc => bc.Badge).FirstOrDefault(),
+                   Handle = profile != null ? profile.Handle : null,
+                   Nickname = profile != null ? profile.Nickname : null,
+                   DisplayName = profile != null ? profile.DisplayName : null,
+                   ImageUrl = profile != null ? profile.ImageUrl : null,
+                   BackgroundCheckBadge = bc != null ? bc.Badge : BackgroundCheckBadge.None,
+                   BackgroundCheckBadgeExpiresAtUtc = bc != null ? bc.BadgeExpiresAtUtc : null,
+                   CheckrLastCheckAtUtc = bc != null ? bc.CheckrLastCheckAtUtc : null,
+                   ProfileVisibility = profile != null ? profile.ProfileVisibility : ProfileVisibility.Public,
+                   ContactVisibility = profile != null ? profile.ContactVisibility : ContactVisibility.Private,
+                   PhoneNumber = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.PhoneNumber : null,
+                   GoogleVoicePhone = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.GoogleVoicePhone : null,
+                   WhatsAppPhone = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.WhatsAppPhone : null,
+                   InstagramHandle = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.InstagramHandle : null,
+                   TelegramHandle = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.TelegramHandle : null,
+                   SignalPhone = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.SignalPhone : null,
                    UserCreatedAtUtc = blocked.CreatedAtUtc,
                    ConnectionCreatedAtUtc = block.CreatedAtUtc
                };

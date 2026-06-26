@@ -202,6 +202,25 @@ The `Friendship` unique index is on `(RequesterId, AddresseeId)`, which prevents
 
 Every row returned from `searchUsers` carries a `ViewerFriendshipState` field — one of `None`, `RequestSent`, `RequestReceived`, `Friends` — relative to the authenticated viewer. The projection is computed in SQL via three `EXISTS` subqueries hitting the `(RequesterId, Status)` / `(AddresseeId, Status)` helper indexes, so it adds bounded per-row cost at typeahead page sizes. The frontend uses this to choose between the Add / Pending / Accept / Friends button without a second round-trip.
 
+### Contact-visibility gating on list projections
+
+Every list query that returns a user row (`searchUsers`, `friends`, `incomingFriendRequests`, `outgoingFriendRequests`, `blockedUsers`) exposes the same set of self-supplied profile fields, but the contact-info subset (`phoneNumber`, `googleVoicePhone`, `whatsAppPhone`, `instagramHandle`, `telegramHandle`, `signalPhone`) is filtered per-row by the row user's `ContactVisibility` setting *and* the viewer's relationship to that user.
+
+The rule is applied in SQL as part of the projection — not in service code, not in the GraphQL layer. That's intentional: the gate is the contract, so any code path that builds a `UserSearchResultDto` or `UserConnectionDto` gets it for free. A malicious client crafting a query asking for `phoneNumber` gets `null` back, not the value, because Postgres never selects the field in the first place when the gate is closed.
+
+| Where the row appears | Public | ConnectionsOnly | Private |
+| --- | --- | --- | --- |
+| `searchUsers` | emitted | emitted only if viewer & target are accepted friends (EXISTS subquery per row) | always `null` |
+| `friends` | emitted | emitted (every row is an accepted friend, so the relationship is constant — no EXISTS needed) | always `null` |
+| `incomingFriendRequests` / `outgoingFriendRequests` | emitted | always `null` (pending ≠ friend yet) | always `null` |
+| `blockedUsers` | emitted | always `null` (block removes any friendship) | always `null` |
+
+Three of the four connection queries don't need the EXISTS subquery because the viewer-to-target relationship is implied by which list you're calling — pending requests are by definition not friends, blocked users by definition are not friends, and friends list rows are by definition friends. Only `searchUsers` needs the per-row friendship check, since results can be strangers, pending, or accepted-friend in any combination. `UserRepository.Search` inlines six `EXISTS` subqueries (one per contact field) — Postgres typically dedupes these into a single common subexpression, but if profiling shows pain we can rewrite the projection as a CTE.
+
+The `ProfileVisibility` and `ContactVisibility` enums themselves are always exposed on every row so the frontend can render a hint ("hidden — connect to see") without having to infer state. `Private` users are also excluded from `searchUsers` entirely (the row doesn't appear at all), not just contact-filtered.
+
+What never leaks through these projections, regardless of visibility settings: Persona-verified PII (`verifiedFirstName/MiddleName/LastName/Birthdate/LicenseState`, `personaVerifiedAtUtc`), internal verification state (`identityVerificationStatus`, `personaInquiryId`, `personaInquiryStatus`), `email`, `termsAcceptedAtUtc`, `subscription`, `deletedAtUtc`. Those only appear on `currentUser` / `getUserById`, which are gated to the caller's own row.
+
 ### Soft-delete behavior
 
 Users use `DeletedAtUtc` + a global query filter for soft-delete with a 72-hour grace period. Friendship/block/flag rows are *not* deleted on soft-delete — they remain so a cancelled deletion restores the social graph intact. Joining these aggregates through `dbContext.Users` (which applies the global filter) naturally hides soft-deleted users from friend lists and search results during the grace window. Hard delete cascades through the `Requester`/`Addressee`/`Blocker`/`Flagger` FKs; the `Blocked`/`FlaggedUser` FKs are `Restrict` to avoid Postgres' "multiple cascade paths through the same User row" error, so child rows must be cleared before a hard purge (which the deletion sweeper handles).
@@ -300,3 +319,13 @@ Accepted social graph shape:
 - Block / flag state is non-disclosing: `BlockedByTarget` and `TargetNotFound` collapse to the same generic error in `sendFriendRequest`
 - No automatic action triggers on flag-count thresholds — moderation remains out-of-band
 - Notifications for incoming friend requests are deferred; the frontend polls `incomingFriendRequests` until subscriptions or push are added
+
+### 2026-06-25
+
+Accepted contact-visibility gating on list projections:
+
+- All five list queries that return user rows (`searchUsers`, `friends`, `incomingFriendRequests`, `outgoingFriendRequests`, `blockedUsers`) expose the same set of self-supplied profile fields plus the verification badge / timestamps
+- Contact-info subset (6 fields: phone, Google Voice, WhatsApp, Instagram, Telegram, Signal) is gated server-side per row by `ContactVisibility` + viewer-friendship status
+- Gate is enforced in the SQL projection, not service code or GraphQL — making it impossible for any client request to bypass
+- "Strict" gating: even on the friends list, `Private` contact stays hidden — a friend who later flips to Private has their fields nulled, not surfaced retroactively
+- Persona-verified PII, internal verification state, email, subscription, terms acceptance, and deletion timestamps stay off these projections entirely — those only appear on `currentUser` / `getUserById`, which are gated to the caller's own row
