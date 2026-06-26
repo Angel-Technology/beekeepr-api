@@ -27,13 +27,13 @@ public sealed class UserManagementTests(PostgresFixture postgres) : IAsyncLifeti
 
         var first = await graphql.SendAsync<CreateUserData>(
             "mutation($input: CreateUserInput!) { createUser(input: $input) { user { id email } error } }",
-            new { input = new { email, displayName = "First" } });
+            new { input = new { email } });
         Assert.Null(first.RequireData().CreateUser.Error);
         var firstId = first.RequireData().CreateUser.User!.Id;
 
         var second = await graphql.SendAsync<CreateUserData>(
             "mutation($input: CreateUserInput!) { createUser(input: $input) { user { id } error } }",
-            new { input = new { email, displayName = "Second" } });
+            new { input = new { email } });
         Assert.Equal("A user with that email already exists.", second.RequireData().CreateUser.Error);
         Assert.Null(second.RequireData().CreateUser.User);
 

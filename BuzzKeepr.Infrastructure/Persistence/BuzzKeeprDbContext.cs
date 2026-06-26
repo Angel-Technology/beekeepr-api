@@ -71,6 +71,33 @@ public sealed class BuzzKeeprDbContext(DbContextOptions<BuzzKeeprDbContext> opti
             builder.Property(profile => profile.PhoneNumber)
                 .HasMaxLength(32);
 
+            builder.Property(profile => profile.GoogleVoicePhone)
+                .HasMaxLength(32);
+
+            builder.Property(profile => profile.WhatsAppPhone)
+                .HasMaxLength(32);
+
+            builder.Property(profile => profile.InstagramHandle)
+                .HasMaxLength(64);
+
+            builder.Property(profile => profile.TelegramHandle)
+                .HasMaxLength(64);
+
+            builder.Property(profile => profile.SignalPhone)
+                .HasMaxLength(32);
+
+            builder.Property(profile => profile.ProfileVisibility)
+                .HasConversion<string>()
+                .HasMaxLength(50)
+                .HasDefaultValue(ProfileVisibility.Public)
+                .IsRequired();
+
+            builder.Property(profile => profile.ContactVisibility)
+                .HasConversion<string>()
+                .HasMaxLength(50)
+                .HasDefaultValue(ContactVisibility.Private)
+                .IsRequired();
+
             builder.Property(profile => profile.CreatedAtUtc)
                 .HasColumnType("timestamp with time zone");
 

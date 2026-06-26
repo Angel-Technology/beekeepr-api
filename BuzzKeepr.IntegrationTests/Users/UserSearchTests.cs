@@ -1,5 +1,6 @@
 using System.Text.Json;
 using BuzzKeepr.Domain.Entities;
+using BuzzKeepr.Domain.Enums;
 using BuzzKeepr.Infrastructure.Persistence;
 using BuzzKeepr.IntegrationTests.Common;
 using Microsoft.EntityFrameworkCore;
@@ -123,6 +124,26 @@ public sealed class UserSearchTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SearchUsers_ExcludesPrivateProfiles()
+    {
+        // ProfileVisibility=Private opts the user out of community discovery — their handle
+        // shouldn't appear even on an exact match.
+        var (callerToken, _) = await SignInAsync();
+        var publicId = await SeedUserAsync(handle: "privtestpub", displayName: null, nickname: null);
+        var privateId = await SeedUserAsync(handle: "privtestpriv", displayName: null, nickname: null);
+        await SetProfileVisibilityAsync(privateId, ProfileVisibility.Private);
+
+        var graphql = AuthenticatedClient(callerToken);
+
+        var response = await graphql.SendAsync<SearchUsersData>(
+            "query { searchUsers(query: \"privtest\", first: 10) { edges { node { id handle } } } }");
+
+        var ids = response.RequireData().SearchUsers.Edges.Select(e => e.Node.Id).ToList();
+        Assert.Contains(publicId, ids);
+        Assert.DoesNotContain(privateId, ids);
+    }
+
+    [Fact]
     public async Task SearchUsers_WithoutSessionReturnsEmpty()
     {
         await SeedUserAsync(handle: "anyone", displayName: null, nickname: null);
@@ -180,6 +201,25 @@ public sealed class UserSearchTests(PostgresFixture postgres) : IAsyncLifetime
             dbContext.UserProfiles.Add(profile);
         }
         profile.Handle = handle;
+        await dbContext.SaveChangesAsync();
+    }
+
+    private async Task SetProfileVisibilityAsync(Guid userId, ProfileVisibility visibility)
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
+        var profile = await dbContext.UserProfiles.FirstOrDefaultAsync(p => p.UserId == userId);
+        if (profile is null)
+        {
+            profile = new UserProfile
+            {
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                CreatedAtUtc = DateTime.UtcNow
+            };
+            dbContext.UserProfiles.Add(profile);
+        }
+        profile.ProfileVisibility = visibility;
         await dbContext.SaveChangesAsync();
     }
 

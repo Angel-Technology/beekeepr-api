@@ -45,6 +45,20 @@ public sealed class UserDto
 
     public DateTime? TermsAcceptedAtUtc { get; init; }
 
+    public string? GoogleVoicePhone { get; init; }
+
+    public string? WhatsAppPhone { get; init; }
+
+    public string? InstagramHandle { get; init; }
+
+    public string? TelegramHandle { get; init; }
+
+    public string? SignalPhone { get; init; }
+
+    public ProfileVisibility ProfileVisibility { get; init; } = ProfileVisibility.Public;
+
+    public ContactVisibility ContactVisibility { get; init; } = ContactVisibility.Private;
+
     public SubscriptionDto Subscription { get; init; } = new();
 
     public DateTime CreatedAtUtc { get; init; }

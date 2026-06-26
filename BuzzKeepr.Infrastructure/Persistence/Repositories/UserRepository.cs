@@ -77,6 +77,10 @@ public sealed class UserRepository(BuzzKeeprDbContext dbContext) : IUserReposito
 
         return profilesWithUsers
             .Where(row => excludeUserId == null || row.User.Id != excludeUserId)
+            // ProfileVisibility=Private opts the user out of community discovery entirely. They
+            // can still be friended directly if someone already knows the handle, but they don't
+            // appear in search.
+            .Where(row => row.Profile.ProfileVisibility == ProfileVisibility.Public)
             // Hide users involved in a block in either direction with the viewer. Flag implies block
             // (see ConnectionsService.FlagUserAsync), so flagged users also drop out here.
             .Where(row => excludeUserId == null

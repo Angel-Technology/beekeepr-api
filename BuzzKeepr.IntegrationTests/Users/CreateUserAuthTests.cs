@@ -56,7 +56,7 @@ public sealed class CreateUserAuthTests(PostgresFixture postgres) : IAsyncLifeti
 
         var response = await graphql.SendAsync<CreateUserData>(
             "mutation($input: CreateUserInput!) { createUser(input: $input) { user { id email } error } }",
-            new { input = new { email, displayName = "Allowed" } });
+            new { input = new { email } });
 
         var payload = response.RequireData().CreateUser;
         Assert.Null(payload.Error);

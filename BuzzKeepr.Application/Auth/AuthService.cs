@@ -299,15 +299,9 @@ public sealed class AuthService(
 
             user.EmailVerified = true;
 
-            var trimmedGoogleDisplayName = string.IsNullOrWhiteSpace(identity.DisplayName)
-                ? null
-                : identity.DisplayName.Trim();
-            if (!string.IsNullOrWhiteSpace(trimmedGoogleDisplayName) || !string.IsNullOrWhiteSpace(identity.ImageUrl))
-            {
-                var profile = user.EnsureProfile();
-                profile.DisplayName ??= trimmedGoogleDisplayName;
-                profile.ImageUrl ??= identity.ImageUrl;
-            }
+            // Intentionally do NOT pull DisplayName / ImageUrl from the Google identity.
+            // App Store reviewers flag apps that auto-populate user-facing profile fields
+            // from third-party providers — the user fills these in through the profile flow.
 
             if (isNewUser) await authRepository.AddUserAsync(user, cancellationToken);
 
@@ -342,8 +336,8 @@ public sealed class AuthService(
         await authRepository.AddSessionAsync(session, cancellationToken);
         await authRepository.SaveChangesAsync(cancellationToken);
 
-        if (isNewUser)
-            await TrySendWelcomeAsync(user, cancellationToken);
+        // No inline welcome — DisplayName isn't captured at Google sign-in anymore. The sweeper
+        // sends the welcome once the user completes their profile.
 
         return new SignInWithGoogleResult
         {
@@ -379,12 +373,11 @@ public sealed class AuthService(
             identity.ProviderAccountId,
             cancellationToken);
 
-        // Apple only sends the user's name on the very first authorization, and the
-        // frontend forwards it via input.DisplayName. Subsequent sign-ins arrive with
-        // input.DisplayName == null, so we treat it as additive only (never overwrite).
-        var displayNameFromClient = string.IsNullOrWhiteSpace(input.DisplayName)
-            ? null
-            : input.DisplayName.Trim();
+        // Apple sends the user's name on the very first authorization only — we used to capture
+        // it into UserProfile.DisplayName. That now goes to /dev/null on purpose: App Store
+        // compliance wants user-facing profile data to be user-supplied, not provider-fetched.
+        // input.DisplayName is still accepted to avoid breaking the existing GraphQL contract,
+        // but ignored. The user fills it in via the profile-completion flow.
 
         User user;
         var isNewUser = false;
@@ -413,11 +406,6 @@ public sealed class AuthService(
 
             // Apple guarantees the email is verified (whether real or @privaterelay).
             user.EmailVerified = user.EmailVerified || identity.EmailVerified;
-
-            if (!string.IsNullOrWhiteSpace(displayNameFromClient))
-            {
-                user.EnsureProfile().DisplayName ??= displayNameFromClient;
-            }
 
             if (isNewUser) await authRepository.AddUserAsync(user, cancellationToken);
 
@@ -452,9 +440,8 @@ public sealed class AuthService(
         await authRepository.AddSessionAsync(session, cancellationToken);
         await authRepository.SaveChangesAsync(cancellationToken);
 
-        // Mirror Google: only welcome new users, and only if we have a name to greet by.
-        if (isNewUser && !string.IsNullOrWhiteSpace(user.Profile?.DisplayName))
-            await TrySendWelcomeAsync(user, cancellationToken);
+        // No inline welcome — DisplayName isn't captured at Apple sign-in anymore. The sweeper
+        // sends the welcome once the user completes their profile.
 
         return new SignInWithAppleResult
         {
@@ -567,6 +554,13 @@ public sealed class AuthService(
             VerifiedBirthdate = iv?.VerifiedBirthdate,
             VerifiedLicenseState = iv?.VerifiedLicenseState,
             PhoneNumber = profile?.PhoneNumber,
+            GoogleVoicePhone = profile?.GoogleVoicePhone,
+            WhatsAppPhone = profile?.WhatsAppPhone,
+            InstagramHandle = profile?.InstagramHandle,
+            TelegramHandle = profile?.TelegramHandle,
+            SignalPhone = profile?.SignalPhone,
+            ProfileVisibility = profile?.ProfileVisibility ?? ProfileVisibility.Public,
+            ContactVisibility = profile?.ContactVisibility ?? ContactVisibility.Private,
             PersonaVerifiedAtUtc = iv?.PersonaVerifiedAtUtc,
             BackgroundCheckBadge = bc?.Badge ?? BackgroundCheckBadge.None,
             BackgroundCheckBadgeExpiresAtUtc = bc?.BadgeExpiresAtUtc,
