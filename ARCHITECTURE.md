@@ -208,14 +208,16 @@ Every list query that returns a user row (`searchUsers`, `friends`, `incomingFri
 
 The rule is applied in SQL as part of the projection — not in service code, not in the GraphQL layer. That's intentional: the gate is the contract, so any code path that builds a `UserSearchResultDto` or `UserConnectionDto` gets it for free. A malicious client crafting a query asking for `phoneNumber` gets `null` back, not the value, because Postgres never selects the field in the first place when the gate is closed.
 
-| Where the row appears | Public | ConnectionsOnly | Private |
-| --- | --- | --- | --- |
-| `searchUsers` | emitted | emitted only if viewer & target are accepted friends (EXISTS subquery per row) | always `null` |
-| `friends` | emitted | emitted (every row is an accepted friend, so the relationship is constant — no EXISTS needed) | always `null` |
-| `incomingFriendRequests` / `outgoingFriendRequests` | emitted | always `null` (pending ≠ friend yet) | always `null` |
-| `blockedUsers` | emitted | always `null` (block removes any friendship) | always `null` |
+| Where the row appears | ConnectionsOnly | Private |
+| --- | --- | --- |
+| `searchUsers` | emitted only if viewer & target are accepted friends (EXISTS subquery per row) | always `null` |
+| `friends` | emitted (every row is an accepted friend, so the relationship is constant — no EXISTS needed) | always `null` |
+| `incomingFriendRequests` / `outgoingFriendRequests` | always `null` (pending ≠ friend yet) | always `null` |
+| `blockedUsers` | always `null` (block removes any friendship) | always `null` |
 
-Three of the four connection queries don't need the EXISTS subquery because the viewer-to-target relationship is implied by which list you're calling — pending requests are by definition not friends, blocked users by definition are not friends, and friends list rows are by definition friends. Only `searchUsers` needs the per-row friendship check, since results can be strangers, pending, or accepted-friend in any combination. `UserRepository.Search` inlines six `EXISTS` subqueries (one per contact field) — Postgres typically dedupes these into a single common subexpression, but if profiling shows pain we can rewrite the projection as a CTE.
+The `Public` value was removed from `ContactVisibility` in PR 3 — contact info no longer flows to strangers via any code path. The only opt-in to share contact data is "with my accepted friends."
+
+Three of the four connection queries don't even need a friendship subquery because the viewer-to-target relationship is implied by which list you're calling — pending requests are by definition not friends, blocked users by definition are not friends, and friends list rows are by definition friends. The Incoming/Outgoing/Blocked projections statically null all 6 contact fields. Only `searchUsers` needs the per-row friendship check (search results can be strangers, pending, or accepted-friend in any combination). `UserRepository.Search` inlines six `EXISTS` subqueries (one per contact field) — Postgres typically dedupes these into a single common subexpression, but if profiling shows pain we can rewrite the projection as a CTE.
 
 The `ProfileVisibility` and `ContactVisibility` enums themselves are always exposed on every row so the frontend can render a hint ("hidden — connect to see") without having to infer state. `Private` users are also excluded from `searchUsers` entirely (the row doesn't appear at all), not just contact-filtered.
 
@@ -329,3 +331,14 @@ Accepted contact-visibility gating on list projections:
 - Gate is enforced in the SQL projection, not service code or GraphQL — making it impossible for any client request to bypass
 - "Strict" gating: even on the friends list, `Private` contact stays hidden — a friend who later flips to Private has their fields nulled, not surfaced retroactively
 - Persona-verified PII, internal verification state, email, subscription, terms acceptance, and deletion timestamps stay off these projections entirely — those only appear on `currentUser` / `getUserById`, which are gated to the caller's own row
+
+### 2026-06-26
+
+Removed `Public` from `ContactVisibility`:
+
+- Enum now has only `ConnectionsOnly` and `Private` — no way to share contact info with strangers
+- Migration `RemovePublicContactVisibility` converts existing `Public` rows → `ConnectionsOnly` (preserves the user's "I opted to share" intent; closest available semantic)
+- The "Share with everyone" toggle on the profile page is gone — UI collapses to "Share with connections" / "Don't share"
+- Default stays `Private` — safe-by-default opt-in
+- Incoming/Outgoing/Blocked projections now statically null the 6 contact fields (no friendship → no contact visibility ever)
+- Breaking GraphQL change: clients sending `contactVisibility: PUBLIC` get a schema-validation error. Frontend must drop the value from any mutation it sends.

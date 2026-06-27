@@ -119,8 +119,12 @@ public sealed class ConnectionsRepository(BuzzKeeprDbContext dbContext) : IConne
 
     // Visibility model summary used by all four list projections below:
     //   - viewerIsFriend is a compile-time constant per query (true on QueryFriends, false on
-    //     the other three) so SQL gets a simple `WHEN contact_visibility = 'Public' THEN x ELSE
-    //     NULL` per contact field — no EXISTS subquery needed for the friendship check.
+    //     the other three) so SQL gets a simple `WHEN contact_visibility = 'ConnectionsOnly'
+    //     AND <viewerIsFriend> THEN x ELSE NULL` per contact field — no EXISTS subquery needed
+    //     for the friendship check.
+    //   - After PR 3 the `Public` ContactVisibility was removed, so non-friend lists
+    //     (Incoming/Outgoing/Blocked) always project null for the 6 contact fields. The CASE
+    //     simplifies to a constant null on those queries.
     //   - profile/bc are LEFT-joined; a missing row produces null, which the projection collapses
     //     to default values (None badge, Public profile, Private contact, null contact fields).
     //
@@ -130,8 +134,10 @@ public sealed class ConnectionsRepository(BuzzKeeprDbContext dbContext) : IConne
 
     public IQueryable<UserConnectionDto> QueryFriends(Guid userId)
     {
-        // Friends list: every row is an Accepted friendship, so Public + ConnectionsOnly contact
-        // emit; Private still hides (strict gating).
+        // Friends list: every row is an Accepted friendship, so ConnectionsOnly contact emits;
+        // Private still hides (strict gating). With Public removed in PR 3, the only opt-in is
+        // ConnectionsOnly — so the test `!= Private` reads as "user has opted to share with
+        // friends." Equivalent to `== ConnectionsOnly` but symmetric with the gating intent.
         var asRequester =
             from friendship in dbContext.Friendships.AsNoTracking()
             join other in dbContext.Users.AsNoTracking() on friendship.AddresseeId equals other.Id
@@ -199,8 +205,8 @@ public sealed class ConnectionsRepository(BuzzKeeprDbContext dbContext) : IConne
 
     public IQueryable<UserConnectionDto> QueryIncomingFriendRequests(Guid userId)
     {
-        // Pending requests aren't friendships, so ConnectionsOnly contact stays hidden —
-        // only Public emits.
+        // Pending requests aren't friendships, and Public was removed — so the 6 contact fields
+        // always project null on this list. ConnectionsOnly users only share with friends.
         return from friendship in dbContext.Friendships.AsNoTracking()
                join requester in dbContext.Users.AsNoTracking() on friendship.RequesterId equals requester.Id
                join profileJoin in dbContext.UserProfiles.AsNoTracking() on requester.Id equals profileJoin.UserId into profileLeft
@@ -221,12 +227,12 @@ public sealed class ConnectionsRepository(BuzzKeeprDbContext dbContext) : IConne
                    CheckrLastCheckAtUtc = bc != null ? bc.CheckrLastCheckAtUtc : null,
                    ProfileVisibility = profile != null ? profile.ProfileVisibility : ProfileVisibility.Public,
                    ContactVisibility = profile != null ? profile.ContactVisibility : ContactVisibility.Private,
-                   PhoneNumber = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.PhoneNumber : null,
-                   GoogleVoicePhone = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.GoogleVoicePhone : null,
-                   WhatsAppPhone = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.WhatsAppPhone : null,
-                   InstagramHandle = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.InstagramHandle : null,
-                   TelegramHandle = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.TelegramHandle : null,
-                   SignalPhone = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.SignalPhone : null,
+                   PhoneNumber = null,
+                   GoogleVoicePhone = null,
+                   WhatsAppPhone = null,
+                   InstagramHandle = null,
+                   TelegramHandle = null,
+                   SignalPhone = null,
                    UserCreatedAtUtc = requester.CreatedAtUtc,
                    ConnectionCreatedAtUtc = friendship.CreatedAtUtc
                };
@@ -234,6 +240,7 @@ public sealed class ConnectionsRepository(BuzzKeeprDbContext dbContext) : IConne
 
     public IQueryable<UserConnectionDto> QueryOutgoingFriendRequests(Guid userId)
     {
+        // Same as Incoming — no friendship yet, no Public option, so contact fields always null.
         return from friendship in dbContext.Friendships.AsNoTracking()
                join addressee in dbContext.Users.AsNoTracking() on friendship.AddresseeId equals addressee.Id
                join profileJoin in dbContext.UserProfiles.AsNoTracking() on addressee.Id equals profileJoin.UserId into profileLeft
@@ -254,12 +261,12 @@ public sealed class ConnectionsRepository(BuzzKeeprDbContext dbContext) : IConne
                    CheckrLastCheckAtUtc = bc != null ? bc.CheckrLastCheckAtUtc : null,
                    ProfileVisibility = profile != null ? profile.ProfileVisibility : ProfileVisibility.Public,
                    ContactVisibility = profile != null ? profile.ContactVisibility : ContactVisibility.Private,
-                   PhoneNumber = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.PhoneNumber : null,
-                   GoogleVoicePhone = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.GoogleVoicePhone : null,
-                   WhatsAppPhone = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.WhatsAppPhone : null,
-                   InstagramHandle = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.InstagramHandle : null,
-                   TelegramHandle = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.TelegramHandle : null,
-                   SignalPhone = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.SignalPhone : null,
+                   PhoneNumber = null,
+                   GoogleVoicePhone = null,
+                   WhatsAppPhone = null,
+                   InstagramHandle = null,
+                   TelegramHandle = null,
+                   SignalPhone = null,
                    UserCreatedAtUtc = addressee.CreatedAtUtc,
                    ConnectionCreatedAtUtc = friendship.CreatedAtUtc
                };
@@ -267,8 +274,9 @@ public sealed class ConnectionsRepository(BuzzKeeprDbContext dbContext) : IConne
 
     public IQueryable<UserConnectionDto> QueryBlockedUsers(Guid userId)
     {
-        // Blocked users are never friends with the viewer (block removes any friendship), so
-        // ConnectionsOnly contact stays hidden — only Public emits.
+        // Block removes any friendship, so the viewer is never a friend of anyone on this list.
+        // With Public removed, ConnectionsOnly contact never emits to non-friends — so contact
+        // fields are always null on the blocked list.
         return from block in dbContext.UserBlocks.AsNoTracking()
                join blocked in dbContext.Users.AsNoTracking() on block.BlockedId equals blocked.Id
                join profileJoin in dbContext.UserProfiles.AsNoTracking() on blocked.Id equals profileJoin.UserId into profileLeft
@@ -289,12 +297,12 @@ public sealed class ConnectionsRepository(BuzzKeeprDbContext dbContext) : IConne
                    CheckrLastCheckAtUtc = bc != null ? bc.CheckrLastCheckAtUtc : null,
                    ProfileVisibility = profile != null ? profile.ProfileVisibility : ProfileVisibility.Public,
                    ContactVisibility = profile != null ? profile.ContactVisibility : ContactVisibility.Private,
-                   PhoneNumber = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.PhoneNumber : null,
-                   GoogleVoicePhone = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.GoogleVoicePhone : null,
-                   WhatsAppPhone = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.WhatsAppPhone : null,
-                   InstagramHandle = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.InstagramHandle : null,
-                   TelegramHandle = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.TelegramHandle : null,
-                   SignalPhone = profile != null && profile.ContactVisibility == ContactVisibility.Public ? profile.SignalPhone : null,
+                   PhoneNumber = null,
+                   GoogleVoicePhone = null,
+                   WhatsAppPhone = null,
+                   InstagramHandle = null,
+                   TelegramHandle = null,
+                   SignalPhone = null,
                    UserCreatedAtUtc = blocked.CreatedAtUtc,
                    ConnectionCreatedAtUtc = block.CreatedAtUtc
                };

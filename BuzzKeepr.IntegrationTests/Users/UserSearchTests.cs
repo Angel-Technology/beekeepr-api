@@ -144,25 +144,6 @@ public sealed class UserSearchTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SearchUsers_PublicContact_VisibleToStranger()
-    {
-        // ContactVisibility=Public means anyone (including strangers) sees the contact fields.
-        var (callerToken, _) = await SignInAsync();
-        var targetId = await SeedUserAsync(handle: "publicpat", displayName: null, nickname: null);
-        await SetContactAsync(targetId, ContactVisibility.Public,
-            phone: "+14155552671", instagram: "patinsta");
-
-        var graphql = AuthenticatedClient(callerToken);
-
-        var response = await graphql.SendAsync<SearchUsersContactData>(
-            "query { searchUsers(query: \"publicpat\", first: 5) { edges { node { id phoneNumber instagramHandle contactVisibility } } } }");
-        var node = response.RequireData().SearchUsers.Edges.Single(e => e.Node.Id == targetId).Node;
-        Assert.Equal("+14155552671", node.PhoneNumber);
-        Assert.Equal("patinsta", node.InstagramHandle);
-        Assert.Equal("PUBLIC", node.ContactVisibility);
-    }
-
-    [Fact]
     public async Task SearchUsers_ConnectionsOnlyContact_HiddenFromStranger_VisibleToFriend()
     {
         // ContactVisibility=ConnectionsOnly hides contact from non-friends, exposes to friends.

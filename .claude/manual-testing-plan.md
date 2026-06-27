@@ -1265,9 +1265,16 @@ query { searchUsers(query: "sammy", first: 10) { edges { node { id handle } } } 
 
 Flip back to `PUBLIC` and rerun search → user A reappears.
 
-### 21.7 ContactVisibility — no enforcement yet
+### 21.7 ContactVisibility enforcement
 
-`contactVisibility` is stored faithfully (Public / ConnectionsOnly / Private) but the backend doesn't gate any read path on it yet. There's no "view someone else's full profile" query in this PR. When that screen lands it'll filter contact fields based on this enum + friendship state. For now: just verify the value round-trips through `updateProfile` → `currentUser`.
+`contactVisibility` accepts two values: `CONNECTIONS_ONLY` and `PRIVATE`. The `Public` value was removed in PR 3 — contact info no longer flows to strangers via any code path. The gate is enforced server-side in the SQL projections of `searchUsers` and all four connection list queries (see ARCHITECTURE.md → Social Graph → Contact-visibility gating).
+
+Verify in Banana Cake Pop:
+- As caller A, search for user B who has `contactVisibility: CONNECTIONS_ONLY` and is not your friend → all 6 contact fields return `null`.
+- Befriend B (`sendFriendRequest` then `acceptFriendRequest`) → re-run search → contact fields now return real values.
+- Flip B's `contactVisibility` to `PRIVATE` via `updateProfile` (as B) → re-run search as A (still a friend) → contact fields return `null` again. Verifies strict gating.
+
+Sending `contactVisibility: PUBLIC` to `updateProfile` returns a GraphQL schema-validation error — the enum value no longer exists. Frontend must drop any code path that sets it.
 
 ### 21.8 The whole profile in one call
 
@@ -1481,7 +1488,7 @@ Once you've worked through phases 4–22, the following are end-to-end-verified 
 | `updateProfile` — Nickname, Handle, all contact fields | 21.2–21.5, 21.8 |
 | `updateProfile` — image URL | 21.5 |
 | `ProfileVisibility=Private` excludes from search | 21.6 |
-| `ContactVisibility` round-trip (no enforcement yet) | 21.7 |
+| `ContactVisibility` enforcement (ConnectionsOnly + friend = visible; otherwise null) | 21.7 |
 | Deferred welcome chain (signup → updateProfile → sweeper) | 17, 21.9 |
 | Friend requests — send / accept / decline / cancel | 22.1, 22.3 |
 | Mutual-interest auto-accept | 22.2 |
