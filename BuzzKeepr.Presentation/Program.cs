@@ -89,7 +89,8 @@ builder.Services
     .AddMutationType<UserMutations>()
     .AddTypeExtension<BillingMutations>()
     .AddTypeExtension<ConnectionsMutations>()
-    .AddTypeExtension<ConnectionsQueries>();
+    .AddTypeExtension<ConnectionsQueries>()
+    .AddTypeExtension<NotificationMutations>();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>

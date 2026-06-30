@@ -1,4 +1,5 @@
 using BuzzKeepr.Application.Connections;
+using BuzzKeepr.Application.Notifications;
 using BuzzKeepr.Domain.Entities;
 using BuzzKeepr.Domain.Enums;
 using NSubstitute;
@@ -8,6 +9,7 @@ namespace BuzzKeepr.UnitTests.Connections;
 public sealed class ConnectionsServiceTests
 {
     private readonly IConnectionsRepository repository = Substitute.For<IConnectionsRepository>();
+    private readonly IFriendRequestNotifier notifier = Substitute.For<IFriendRequestNotifier>();
     private readonly ConnectionsService sut;
 
     private static readonly Guid Caller = Guid.Parse("11111111-1111-1111-1111-111111111111");
@@ -15,7 +17,7 @@ public sealed class ConnectionsServiceTests
 
     public ConnectionsServiceTests()
     {
-        sut = new ConnectionsService(repository);
+        sut = new ConnectionsService(repository, notifier);
 
         // Defaults: target exists, no blocks in either direction. Individual tests override these.
         repository.UserExistsAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(true);
@@ -82,6 +84,9 @@ public sealed class ConnectionsServiceTests
         Assert.Equal(FriendshipStatus.Pending, result.Friendship!.Status);
         repository.Received(1).AddFriendship(Arg.Is<Friendship>(f =>
             f.RequesterId == Caller && f.AddresseeId == Target && f.Status == FriendshipStatus.Pending));
+        // Notify the addressee that they have a new incoming request.
+        await notifier.Received(1).NotifyRequestReceivedAsync(Target, Caller, Arg.Any<CancellationToken>());
+        await notifier.DidNotReceive().NotifyRequestAcceptedAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -102,6 +107,9 @@ public sealed class ConnectionsServiceTests
         Assert.True(result.Success);
         Assert.Equal(FriendshipStatus.Accepted, result.Friendship!.Status);
         repository.DidNotReceiveWithAnyArgs().AddFriendship(default!);
+        // Idempotent no-op MUST NOT spam the addressee with a duplicate notification.
+        await notifier.DidNotReceiveWithAnyArgs().NotifyRequestReceivedAsync(default, default, default);
+        await notifier.DidNotReceiveWithAnyArgs().NotifyRequestAcceptedAsync(default, default, default);
     }
 
     [Fact]
@@ -124,6 +132,10 @@ public sealed class ConnectionsServiceTests
         Assert.Equal(FriendshipStatus.Accepted, result.Friendship!.Status);
         Assert.NotNull(reverse.RespondedAtUtc);
         repository.DidNotReceiveWithAnyArgs().AddFriendship(default!);
+        // Target was waiting on their outgoing request to Caller; Caller just auto-accepted.
+        // Notify Target their request is now accepted (Caller already knows what they did).
+        await notifier.Received(1).NotifyRequestAcceptedAsync(Target, Caller, Arg.Any<CancellationToken>());
+        await notifier.DidNotReceive().NotifyRequestReceivedAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -154,6 +166,8 @@ public sealed class ConnectionsServiceTests
         Assert.True(result.Success);
         Assert.Equal(FriendshipStatus.Accepted, pending.Status);
         Assert.NotNull(pending.RespondedAtUtc);
+        // Notify the original requester (Target) — Caller already knows they just accepted.
+        await notifier.Received(1).NotifyRequestAcceptedAsync(Target, Caller, Arg.Any<CancellationToken>());
     }
 
     [Fact]

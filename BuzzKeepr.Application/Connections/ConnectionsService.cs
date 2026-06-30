@@ -1,10 +1,13 @@
 using BuzzKeepr.Application.Connections.Models;
+using BuzzKeepr.Application.Notifications;
 using BuzzKeepr.Domain.Entities;
 using BuzzKeepr.Domain.Enums;
 
 namespace BuzzKeepr.Application.Connections;
 
-public sealed class ConnectionsService(IConnectionsRepository repository) : IConnectionsService
+public sealed class ConnectionsService(
+    IConnectionsRepository repository,
+    IFriendRequestNotifier notifier) : IConnectionsService
 {
     public async Task<SendFriendRequestResult> SendFriendRequestAsync(
         Guid currentUserId,
@@ -38,10 +41,16 @@ public sealed class ConnectionsService(IConnectionsRepository repository) : ICon
                 existing.Status = FriendshipStatus.Accepted;
                 existing.RespondedAtUtc = DateTime.UtcNow;
                 await repository.SaveChangesAsync(cancellationToken);
+
+                // Auto-accept: notify the OTHER user (the original requester) that their
+                // outgoing request was accepted. They were waiting on it; the current user
+                // already knows what they just did.
+                await notifier.NotifyRequestAcceptedAsync(targetUserId, currentUserId, cancellationToken);
+
                 return new SendFriendRequestResult { Success = true, Friendship = MapFriendship(existing) };
             }
 
-            // Already-pending-by-caller or already-accepted: idempotent no-op.
+            // Already-pending-by-caller or already-accepted: idempotent no-op — don't notify.
             return new SendFriendRequestResult { Success = true, Friendship = MapFriendship(existing) };
         }
 
@@ -56,6 +65,9 @@ public sealed class ConnectionsService(IConnectionsRepository repository) : ICon
 
         repository.AddFriendship(friendship);
         await repository.SaveChangesAsync(cancellationToken);
+
+        // Fresh request — tell the addressee.
+        await notifier.NotifyRequestReceivedAsync(targetUserId, currentUserId, cancellationToken);
 
         return new SendFriendRequestResult { Success = true, Friendship = MapFriendship(friendship) };
     }
@@ -73,6 +85,10 @@ public sealed class ConnectionsService(IConnectionsRepository repository) : ICon
         pending.Status = FriendshipStatus.Accepted;
         pending.RespondedAtUtc = DateTime.UtcNow;
         await repository.SaveChangesAsync(cancellationToken);
+
+        // Tell the original requester their request was accepted. Current user just performed
+        // the accept so they already know — only notify the other side.
+        await notifier.NotifyRequestAcceptedAsync(requesterId, currentUserId, cancellationToken);
 
         return new RespondToFriendRequestResult { Success = true, Friendship = MapFriendship(pending) };
     }

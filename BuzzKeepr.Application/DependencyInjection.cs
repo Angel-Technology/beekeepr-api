@@ -12,6 +12,8 @@ public static class DependencyInjection
         services.AddScoped<IdentityVerification.IIdentityVerificationService, IdentityVerification.IdentityVerificationService>();
         services.AddScoped<Users.IUserService, Users.UserService>();
         services.AddScoped<Connections.IConnectionsService, Connections.ConnectionsService>();
+        services.AddScoped<Notifications.IFriendRequestNotifier, Notifications.FriendRequestNotifier>();
+        services.AddScoped<Notifications.IPushTokenService, Notifications.PushTokenService>();
 
         return services;
     }

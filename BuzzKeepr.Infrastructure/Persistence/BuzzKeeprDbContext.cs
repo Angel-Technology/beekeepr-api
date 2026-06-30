@@ -19,6 +19,7 @@ public sealed class BuzzKeeprDbContext(DbContextOptions<BuzzKeeprDbContext> opti
     public DbSet<UserIdentityVerification> UserIdentityVerifications => Set<UserIdentityVerification>();
     public DbSet<UserBackgroundCheck> UserBackgroundChecks => Set<UserBackgroundCheck>();
     public DbSet<UserSubscription> UserSubscriptions => Set<UserSubscription>();
+    public DbSet<UserPushToken> UserPushTokens => Set<UserPushToken>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -465,6 +466,45 @@ public sealed class BuzzKeeprDbContext(DbContextOptions<BuzzKeeprDbContext> opti
             // Reverse lookup: "has anyone blocked me?" — needed when validating an incoming friend
             // request to make sure the target hasn't blocked the caller.
             builder.HasIndex(block => block.BlockedId);
+        });
+
+        modelBuilder.Entity<UserPushToken>(builder =>
+        {
+            builder.HasKey(token => token.Id);
+
+            builder.Property(token => token.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .ValueGeneratedOnAdd();
+
+            builder.Property(token => token.Token)
+                // Expo tokens look like ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx] — ~50 chars in
+                // practice. Cap at 256 to leave generous headroom for any future scheme bump.
+                .HasMaxLength(256)
+                .IsRequired();
+
+            builder.Property(token => token.Platform)
+                .HasConversion<string>()
+                .HasMaxLength(20)
+                .IsRequired();
+
+            builder.Property(token => token.CreatedAtUtc)
+                .HasColumnType("timestamp with time zone");
+
+            builder.Property(token => token.LastSeenAtUtc)
+                .HasColumnType("timestamp with time zone");
+
+            builder.HasOne(token => token.User)
+                .WithMany()
+                .HasForeignKey(token => token.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // The token string is globally unique by Expo guarantee. Re-registering the same
+            // token (e.g. user reopens the app) UPSERTs by hitting this unique on the way in.
+            builder.HasIndex(token => token.Token)
+                .IsUnique();
+
+            // Look up all tokens for a user — the notifier joins on this when sending pushes.
+            builder.HasIndex(token => token.UserId);
         });
 
         modelBuilder.Entity<UserFlag>(builder =>
