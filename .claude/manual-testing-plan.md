@@ -186,12 +186,12 @@ Restart. Same email now lands on the real Resend path and the fixed PIN no longe
 
 ### Production setup (Render)
 
-Per `render.yaml`, both `buzzkeepr-api-prod` and `buzzkeepr-api-develop` declare two indexed reviewer slots with `sync: false`:
+Per `render.yaml`, `buzzkeepr-api-prod` declares two indexed reviewer slots with `sync: false`:
 
 - `Auth__ReviewAccounts__0__Email` / `Auth__ReviewAccounts__0__Pin`
 - `Auth__ReviewAccounts__1__Email` / `Auth__ReviewAccounts__1__Pin`
 
-Set Email + Pin per slot in Render UI → service → Environment, save (redeploys). The list shape (instead of an email-keyed dictionary) is required because **Render rejects env-var keys containing `@`**. To add additional reviewers, append a new pair of slots at the next index (`__2__`, `__3__`, …) to **both** services in `render.yaml`, commit + push, then set Email + Pin in Render UI. **Delete the slots from Render UI once review is approved** — long-lived fixed PINs are an audit liability.
+Set Email + Pin per slot in Render UI → service → Environment, save (redeploys). The list shape (instead of an email-keyed dictionary) is required because **Render rejects env-var keys containing `@`**. To add additional reviewers, append a new pair of slots at the next index (`__2__`, `__3__`, …) in `render.yaml`, commit + push, then set Email + Pin in Render UI. **Delete the slots from Render UI once review is approved** — long-lived fixed PINs are an audit liability.
 
 ---
 
@@ -788,7 +788,7 @@ DELETE FROM "UserSubscriptions" WHERE "UserId" = '<USER_ID>';
 
 ### Notes
 
-- **Real RevenueCat → backend** can't be tested locally without a public URL. Use the develop Render service (`https://buzzkeepr-api-develop.onrender.com/webhooks/revenuecat`) configured in the RevenueCat dashboard, or expose localhost via cloudflared / ngrok. RevenueCat also has a "Send Test Event" button on each webhook config row that fires a `TEST` event — useful for confirming auth + reachability without needing a real purchase.
+- **Real RevenueCat → backend** can't be tested locally without a public URL. Either point the RevenueCat webhook at the prod Render service (`https://buzzkeepr-api-prod.onrender.com/webhooks/revenuecat`), or expose localhost via cloudflared / ngrok. RevenueCat also has a "Send Test Event" button on each webhook config row that fires a `TEST` event — useful for confirming auth + reachability without needing a real purchase.
 - **REST fallback path** (`IBillingService.GetSubscriptionForUserAsync`) isn't exercised through `currentUser`, which reads the mirror directly. It only fires when something explicitly calls the service — e.g. a future paid-surface gate. The integration tests cover it.
 
 ---

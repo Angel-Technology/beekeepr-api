@@ -2,9 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [main, develop]
+    branches: [main]
   push:
-    branches: [main, develop]
+    branches: [main]
 
 env:
   # GitHub is migrating JavaScript actions to Node 24 (default June 2 2026, mandatory
