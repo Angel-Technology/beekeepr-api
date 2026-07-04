@@ -150,7 +150,7 @@ Auth__ReviewAccounts__1__Pin   = 67890
 
 (Why the list shape instead of a dictionary keyed by email? **Render rejects `@` in env var keys.** Keying by email would force every reviewer email into the key name; the indexed `[i].Email` / `[i].Pin` form sidesteps that.)
 
-Both prod and develop services declare slots `__0__` and `__1__` in `render.yaml` with `sync: false`; the Email and Pin values are set per-service in the Render UI so they don't land in git.
+The prod service declares slots `__0__` and `__1__` in `render.yaml` with `sync: false`; the Email and Pin values are set in the Render UI so they don't land in git.
 
 **Rules and gotchas:**
 

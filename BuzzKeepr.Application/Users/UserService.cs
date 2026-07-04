@@ -1,8 +1,8 @@
 using System.Text.RegularExpressions;
 using BuzzKeepr.Application.Billing.Models;
-using BuzzKeepr.Application.IdentityVerification;
 using BuzzKeepr.Application.Users.Models;
 using BuzzKeepr.Domain.Entities;
+using BuzzKeepr.Domain.Enums;
 using Microsoft.Extensions.Logging;
 
 namespace BuzzKeepr.Application.Users;
@@ -13,6 +13,12 @@ public sealed class UserService(
     ILogger<UserService> logger) : IUserService
 {
     private const int NicknameMaxLength = 50;
+    private const int DisplayNameMaxLength = 200;
+    private const int PhoneMaxLength = 32;
+    private const int SocialHandleMaxLength = 64;
+    // Matches the column cap on UserProfile.ImageUrl. Frontend uploads the avatar to its own
+    // storage and hands us the resulting URL — backend just length-bounds and stores the string.
+    private const int ImageUrlMaxLength = 2048;
 
     // Two chars is enough for prefix lookups (e.g. "sa") while still blocking single-char queries
     // that would behave like a full enumeration of the user table.
@@ -58,26 +64,15 @@ public sealed class UserService(
         {
             Id = Guid.NewGuid(),
             Email = normalizedEmail,
-            DisplayName = string.IsNullOrWhiteSpace(input.DisplayName) ? null : input.DisplayName.Trim(),
             EmailVerified = false,
             CreatedAtUtc = DateTime.UtcNow
         };
 
         await userRepository.AddAsync(user, cancellationToken);
 
-        try
-        {
-            await welcomeEmailSender.SendWelcomeAsync(user.Email, user.DisplayName, cancellationToken);
-            user.WelcomeEmailSentAtUtc = DateTime.UtcNow;
-            await userRepository.SaveChangesAsync(cancellationToken);
-        }
-        catch (Exception exception)
-        {
-            logger.LogWarning(
-                exception,
-                "Welcome email failed to send for user {UserId}; sweeper will retry.",
-                user.Id);
-        }
+        // Welcome email is deferred — we have no DisplayName at signup. The sweeper picks the
+        // user up once they complete their profile (or, for users who go through Persona, when
+        // VerifiedFirstName lands via the webhook).
 
         return new CreateUserResult
         {
@@ -153,6 +148,28 @@ public sealed class UserService(
             }
         }
 
+        if (!TryNormalizeOptional(input.DisplayName, DisplayNameMaxLength, out var normalizedDisplayName))
+            return new UpdateProfileResult { DisplayNameTooLong = true };
+
+        if (!TryNormalizeOptional(input.ImageUrl, ImageUrlMaxLength, out var normalizedImageUrl))
+            return new UpdateProfileResult { ImageUrlTooLong = true };
+
+        if (!TryNormalizeOptional(input.GoogleVoicePhone, PhoneMaxLength, out var normalizedGoogleVoice)
+            || !TryNormalizeOptional(input.WhatsAppPhone, PhoneMaxLength, out var normalizedWhatsApp)
+            || !TryNormalizeOptional(input.SignalPhone, PhoneMaxLength, out var normalizedSignal)
+            || !TryNormalizeOptional(input.InstagramHandle, SocialHandleMaxLength, out var normalizedInstagram)
+            || !TryNormalizeOptional(input.TelegramHandle, SocialHandleMaxLength, out var normalizedTelegram)
+            || !TryNormalizeOptional(input.SnapchatHandle, SocialHandleMaxLength, out var normalizedSnapchat))
+        {
+            return new UpdateProfileResult { ContactFieldTooLong = true };
+        }
+
+        // The frontend allows users to type "@handle" or "handle" interchangeably; canonicalize
+        // to no-leading-@ so storage is consistent and the display layer owns the prefix.
+        normalizedInstagram = normalizedInstagram?.TrimStart('@');
+        normalizedTelegram = normalizedTelegram?.TrimStart('@');
+        normalizedSnapchat = normalizedSnapchat?.TrimStart('@');
+
         var user = await userRepository.GetByIdForUpdateAsync(userId, cancellationToken);
 
         if (user is null)
@@ -160,21 +177,53 @@ public sealed class UserService(
             return new UpdateProfileResult { UserNotFound = true };
         }
 
+        var profile = user.EnsureProfile();
+
         if (input.Nickname is not null)
-        {
-            user.Nickname = normalizedNickname;
-        }
+            profile.Nickname = normalizedNickname;
 
         if (input.Handle is not null)
         {
             if (normalizedHandle is not null
-                && !string.Equals(user.Handle, normalizedHandle, StringComparison.Ordinal)
+                && !string.Equals(profile.Handle, normalizedHandle, StringComparison.Ordinal)
                 && await userRepository.HandleExistsAsync(normalizedHandle, userId, cancellationToken))
             {
                 return new UpdateProfileResult { HandleAlreadyTaken = true };
             }
-            user.Handle = normalizedHandle;
+            profile.Handle = normalizedHandle;
         }
+
+        if (input.DisplayName is not null)
+            profile.DisplayName = normalizedDisplayName;
+
+        if (input.ImageUrl is not null)
+            profile.ImageUrl = normalizedImageUrl;
+
+        if (input.GoogleVoicePhone is not null)
+            profile.GoogleVoicePhone = normalizedGoogleVoice;
+
+        if (input.WhatsAppPhone is not null)
+            profile.WhatsAppPhone = normalizedWhatsApp;
+
+        if (input.InstagramHandle is not null)
+            profile.InstagramHandle = normalizedInstagram;
+
+        if (input.TelegramHandle is not null)
+            profile.TelegramHandle = normalizedTelegram;
+
+        if (input.SnapchatHandle is not null)
+            profile.SnapchatHandle = normalizedSnapchat;
+
+        if (input.SignalPhone is not null)
+            profile.SignalPhone = normalizedSignal;
+
+        if (input.ProfileVisibility.HasValue)
+            profile.ProfileVisibility = input.ProfileVisibility.Value;
+
+        if (input.ContactVisibility.HasValue)
+            profile.ContactVisibility = input.ContactVisibility.Value;
+
+        profile.UpdatedAtUtc = DateTime.UtcNow;
 
         await userRepository.SaveChangesAsync(cancellationToken);
 
@@ -183,6 +232,21 @@ public sealed class UserService(
             Success = true,
             User = MapUser(user)
         };
+    }
+
+    // Generic length-bounded trim. Empty string after trim clears the field; null input means
+    // "don't touch." Returns false only when the input would exceed the cap.
+    private static bool TryNormalizeOptional(string? raw, int maxLength, out string? normalized)
+    {
+        normalized = null;
+        if (raw is null) return true;
+
+        var trimmed = raw.Trim();
+        if (trimmed.Length == 0) return true;
+        if (trimmed.Length > maxLength) return false;
+
+        normalized = trimmed;
+        return true;
     }
 
     public async Task<RequestAccountDeletionResult> RequestAccountDeletionAsync(
@@ -275,29 +339,41 @@ public sealed class UserService(
         };
     }
 
-    private static UserDto MapUser(User user)
+    internal static UserDto MapUser(User user)
     {
+        var profile = user.Profile;
+        var iv = user.IdentityVerification;
+        var bc = user.BackgroundCheck;
+
         return new UserDto
         {
             Id = user.Id,
             Email = user.Email,
-            DisplayName = user.DisplayName,
-            Nickname = user.Nickname,
-            Handle = user.Handle,
-            ImageUrl = user.ImageUrl,
+            DisplayName = profile?.DisplayName,
+            Nickname = profile?.Nickname,
+            Handle = profile?.Handle,
+            ImageUrl = profile?.ImageUrl,
+            GoogleVoicePhone = profile?.GoogleVoicePhone,
+            WhatsAppPhone = profile?.WhatsAppPhone,
+            InstagramHandle = profile?.InstagramHandle,
+            TelegramHandle = profile?.TelegramHandle,
+            SnapchatHandle = profile?.SnapchatHandle,
+            SignalPhone = profile?.SignalPhone,
+            ProfileVisibility = profile?.ProfileVisibility ?? ProfileVisibility.Public,
+            ContactVisibility = profile?.ContactVisibility ?? ContactVisibility.Private,
             EmailVerified = user.EmailVerified,
-            IdentityVerificationStatus = user.IdentityVerificationStatus,
-            PersonaInquiryId = user.PersonaInquiryId,
-            PersonaInquiryStatus = user.PersonaInquiryStatus,
-            VerifiedFirstName = user.VerifiedFirstName,
-            VerifiedMiddleName = user.VerifiedMiddleName,
-            VerifiedLastName = user.VerifiedLastName,
-            VerifiedBirthdate = user.VerifiedBirthdate,
-            VerifiedLicenseState = user.VerifiedLicenseState,
-            PhoneNumber = user.PhoneNumber,
-            PersonaVerifiedAtUtc = user.PersonaVerifiedAtUtc,
-            BackgroundCheckBadge = user.BackgroundCheckBadge,
-            BackgroundCheckBadgeExpiresAtUtc = user.BackgroundCheckBadgeExpiresAtUtc,
+            IdentityVerificationStatus = iv?.Status ?? IdentityVerificationStatus.NotStarted,
+            PersonaInquiryId = iv?.PersonaInquiryId,
+            PersonaInquiryStatus = iv?.PersonaInquiryStatus,
+            VerifiedFirstName = iv?.VerifiedFirstName,
+            VerifiedMiddleName = iv?.VerifiedMiddleName,
+            VerifiedLastName = iv?.VerifiedLastName,
+            VerifiedBirthdate = iv?.VerifiedBirthdate,
+            VerifiedLicenseState = iv?.VerifiedLicenseState,
+            PersonaVerifiedAtUtc = iv?.PersonaVerifiedAtUtc,
+            BackgroundCheckBadge = bc?.Badge ?? BackgroundCheckBadge.None,
+            BackgroundCheckBadgeExpiresAtUtc = bc?.BadgeExpiresAtUtc,
+            CheckrLastCheckAtUtc = bc?.CheckrLastCheckAtUtc,
             TermsAcceptedAtUtc = user.TermsAcceptedAtUtc,
             Subscription = SubscriptionDto.FromUser(user),
             CreatedAtUtc = user.CreatedAtUtc,

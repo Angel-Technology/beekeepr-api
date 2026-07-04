@@ -60,16 +60,18 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
 
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
-        var user = await dbContext.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
+        var user = await dbContext.Users.AsNoTracking()
+            .Include(u => u.IdentityVerification)
+            .FirstAsync(u => u.Id == userId);
 
-        Assert.Equal(IdentityVerificationStatus.Approved, user.IdentityVerificationStatus);
-        Assert.Equal(PersonaInquiryStatus.Approved, user.PersonaInquiryStatus);
-        Assert.Equal("Jane", user.VerifiedFirstName);
-        Assert.Equal("Quinn", user.VerifiedMiddleName);
-        Assert.Equal("Doe", user.VerifiedLastName);
-        Assert.Equal("1990-01-01", user.VerifiedBirthdate);
-        Assert.Equal("CA", user.VerifiedLicenseState);
-        Assert.NotNull(user.PersonaVerifiedAtUtc);
+        Assert.Equal(IdentityVerificationStatus.Approved, user.IdentityVerification!.Status);
+        Assert.Equal(PersonaInquiryStatus.Approved, user.IdentityVerification!.PersonaInquiryStatus);
+        Assert.Equal("Jane", user.IdentityVerification!.VerifiedFirstName);
+        Assert.Equal("Quinn", user.IdentityVerification!.VerifiedMiddleName);
+        Assert.Equal("Doe", user.IdentityVerification!.VerifiedLastName);
+        Assert.Equal("1990-01-01", user.IdentityVerification!.VerifiedBirthdate);
+        Assert.Equal("CA", user.IdentityVerification!.VerifiedLicenseState);
+        Assert.NotNull(user.IdentityVerification!.PersonaVerifiedAtUtc);
     }
 
     [Fact]
@@ -110,7 +112,9 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
 
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
-        var user = await dbContext.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
+        var user = await dbContext.Users.AsNoTracking()
+            .Include(u => u.IdentityVerification)
+            .FirstAsync(u => u.Id == userId);
         Assert.NotNull(user.WelcomeEmailSentAtUtc);
     }
 
@@ -147,10 +151,10 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
         await using (var scope = factory.Services.CreateAsyncScope())
         {
             var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
-            await dbContext.Users
-                .Where(u => u.Id == userId)
+            await dbContext.UserIdentityVerifications
+                .Where(iv => iv.UserId == userId)
                 .ExecuteUpdateAsync(setters => setters
-                    .SetProperty(u => u.IdentityVerificationStatus, IdentityVerificationStatus.Failed));
+                    .SetProperty(iv => iv.Status, IdentityVerificationStatus.Failed));
         }
 
         factory.FakePersona.NextCreateInquiryResult = new CreatePersonaInquiryResult
@@ -218,12 +222,14 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
 
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
-        var user = await dbContext.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
+        var user = await dbContext.Users.AsNoTracking()
+            .Include(u => u.IdentityVerification)
+            .FirstAsync(u => u.Id == userId);
 
-        Assert.Equal(IdentityVerificationStatus.Approved, user.IdentityVerificationStatus);
-        Assert.Equal(PersonaInquiryStatus.Approved, user.PersonaInquiryStatus);
-        Assert.Equal("Approved", user.VerifiedFirstName);
-        Assert.Equal("User", user.VerifiedLastName);
+        Assert.Equal(IdentityVerificationStatus.Approved, user.IdentityVerification!.Status);
+        Assert.Equal(PersonaInquiryStatus.Approved, user.IdentityVerification!.PersonaInquiryStatus);
+        Assert.Equal("Approved", user.IdentityVerification!.VerifiedFirstName);
+        Assert.Equal("User", user.IdentityVerification!.VerifiedLastName);
     }
 
     [Fact]
@@ -307,10 +313,10 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
         await using (var scope = factory.Services.CreateAsyncScope())
         {
             var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
-            await dbContext.Users
-                .Where(u => u.Id == userId)
+            await dbContext.UserIdentityVerifications
+                .Where(iv => iv.UserId == userId)
                 .ExecuteUpdateAsync(setters => setters
-                    .SetProperty(u => u.IdentityVerificationStatus, IdentityVerificationStatus.Failed));
+                    .SetProperty(iv => iv.Status, IdentityVerificationStatus.Failed));
         }
 
         factory.FakePersona.NextCreateInquiryResult = new CreatePersonaInquiryResult
@@ -363,15 +369,17 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
 
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
-        var user = await dbContext.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
+        var user = await dbContext.Users.AsNoTracking()
+            .Include(u => u.IdentityVerification)
+            .FirstAsync(u => u.Id == userId);
 
-        Assert.Equal(IdentityVerificationStatus.Approved, user.IdentityVerificationStatus);
-        Assert.Equal("ALEXANDER J", user.VerifiedFirstName);
-        Assert.Null(user.VerifiedMiddleName);
-        Assert.Equal("SAMPLE", user.VerifiedLastName);
-        Assert.Equal("1977-07-17", user.VerifiedBirthdate);
-        Assert.Equal("CA", user.VerifiedLicenseState);
-        Assert.NotNull(user.PersonaVerifiedAtUtc);
+        Assert.Equal(IdentityVerificationStatus.Approved, user.IdentityVerification!.Status);
+        Assert.Equal("ALEXANDER J", user.IdentityVerification!.VerifiedFirstName);
+        Assert.Null(user.IdentityVerification!.VerifiedMiddleName);
+        Assert.Equal("SAMPLE", user.IdentityVerification!.VerifiedLastName);
+        Assert.Equal("1977-07-17", user.IdentityVerification!.VerifiedBirthdate);
+        Assert.Equal("CA", user.IdentityVerification!.VerifiedLicenseState);
+        Assert.NotNull(user.IdentityVerification!.PersonaVerifiedAtUtc);
     }
 
     [Fact]
@@ -409,13 +417,15 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
 
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
-        var user = await dbContext.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
+        var user = await dbContext.Users.AsNoTracking()
+            .Include(u => u.IdentityVerification)
+            .FirstAsync(u => u.Id == userId);
 
-        Assert.Equal(IdentityVerificationStatus.Declined, user.IdentityVerificationStatus);
-        Assert.Equal(PersonaInquiryStatus.Declined, user.PersonaInquiryStatus);
-        Assert.Null(user.VerifiedFirstName);
-        Assert.Null(user.VerifiedLastName);
-        Assert.Null(user.PersonaVerifiedAtUtc);
+        Assert.Equal(IdentityVerificationStatus.Declined, user.IdentityVerification!.Status);
+        Assert.Equal(PersonaInquiryStatus.Declined, user.IdentityVerification!.PersonaInquiryStatus);
+        Assert.Null(user.IdentityVerification!.VerifiedFirstName);
+        Assert.Null(user.IdentityVerification!.VerifiedLastName);
+        Assert.Null(user.IdentityVerification!.PersonaVerifiedAtUtc);
     }
 
     [Fact]
@@ -446,13 +456,15 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
 
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
-        var user = await dbContext.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
+        var user = await dbContext.Users.AsNoTracking()
+            .Include(u => u.IdentityVerification)
+            .FirstAsync(u => u.Id == userId);
 
-        Assert.Equal(IdentityVerificationStatus.Approved, user.IdentityVerificationStatus);
-        Assert.Equal(PersonaInquiryStatus.Approved, user.PersonaInquiryStatus);
-        Assert.Null(user.VerifiedFirstName);
-        Assert.Null(user.VerifiedLastName);
-        Assert.Null(user.PersonaVerifiedAtUtc);
+        Assert.Equal(IdentityVerificationStatus.Approved, user.IdentityVerification!.Status);
+        Assert.Equal(PersonaInquiryStatus.Approved, user.IdentityVerification!.PersonaInquiryStatus);
+        Assert.Null(user.IdentityVerification!.VerifiedFirstName);
+        Assert.Null(user.IdentityVerification!.VerifiedLastName);
+        Assert.Null(user.IdentityVerification!.PersonaVerifiedAtUtc);
     }
 
     [Fact]
@@ -489,11 +501,13 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
         await using (var checkScope = factory.Services.CreateAsyncScope())
         {
             var checkDb = checkScope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
-            var afterCompleted = await checkDb.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
-            Assert.Equal(IdentityVerificationStatus.Completed, afterCompleted.IdentityVerificationStatus);
-            Assert.Equal("Marcus", afterCompleted.VerifiedFirstName);
-            Assert.Null(afterCompleted.VerifiedMiddleName);
-            Assert.Equal("WA", afterCompleted.VerifiedLicenseState);
+            var afterCompleted = await checkDb.Users.AsNoTracking()
+                .Include(u => u.IdentityVerification)
+                .FirstAsync(u => u.Id == userId);
+            Assert.Equal(IdentityVerificationStatus.Completed, afterCompleted.IdentityVerification!.Status);
+            Assert.Equal("Marcus", afterCompleted.IdentityVerification!.VerifiedFirstName);
+            Assert.Null(afterCompleted.IdentityVerification!.VerifiedMiddleName);
+            Assert.Equal("WA", afterCompleted.IdentityVerification!.VerifiedLicenseState);
         }
 
         // The approved webhook also carries inline fields with sentinel "ShouldNotOverwrite"
@@ -513,11 +527,13 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
 
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
-        var user = await dbContext.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
+        var user = await dbContext.Users.AsNoTracking()
+            .Include(u => u.IdentityVerification)
+            .FirstAsync(u => u.Id == userId);
 
-        Assert.Equal(IdentityVerificationStatus.Approved, user.IdentityVerificationStatus);
-        Assert.Equal("Marcus", user.VerifiedFirstName);
-        Assert.Equal("Hill", user.VerifiedLastName);
+        Assert.Equal(IdentityVerificationStatus.Approved, user.IdentityVerification!.Status);
+        Assert.Equal("Marcus", user.IdentityVerification!.VerifiedFirstName);
+        Assert.Equal("Hill", user.IdentityVerification!.VerifiedLastName);
     }
 
     [Fact]
@@ -547,9 +563,11 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
 
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
-        var user = await dbContext.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
-        Assert.Equal(IdentityVerificationStatus.Created, user.IdentityVerificationStatus);
-        Assert.Null(user.PersonaVerifiedAtUtc);
+        var user = await dbContext.Users.AsNoTracking()
+            .Include(u => u.IdentityVerification)
+            .FirstAsync(u => u.Id == userId);
+        Assert.Equal(IdentityVerificationStatus.Created, user.IdentityVerification!.Status);
+        Assert.Null(user.IdentityVerification!.PersonaVerifiedAtUtc);
     }
 
     private async Task<HttpResponseMessage> PostWebhookAsync(string body, string signatureHeader)

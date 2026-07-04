@@ -57,14 +57,19 @@ public sealed class BackgroundCheckRenewalBackgroundService(
         var identityVerificationService = scope.ServiceProvider.GetRequiredService<IIdentityVerificationService>();
         var nowUtc = DateTime.UtcNow;
 
-        var dueForRenewal = await dbContext.Users
-            .Where(user => user.BackgroundCheckBadge != BackgroundCheckBadge.None
-                && user.BackgroundCheckBadgeExpiresAtUtc != null
-                && user.BackgroundCheckBadgeExpiresAtUtc < nowUtc
-                && user.CheckrProfileId != null)
-            .OrderBy(user => user.BackgroundCheckBadgeExpiresAtUtc)
+        // Badge / Checkr profile data now lives on UserBackgroundCheck — pivot through that table
+        // and join Users so the soft-delete query filter still excludes accounts in the
+        // deletion grace window from getting paid Checkr re-runs.
+        var dueForRenewal = await (
+            from bc in dbContext.UserBackgroundChecks.AsNoTracking()
+            join user in dbContext.Users.AsNoTracking() on bc.UserId equals user.Id
+            where bc.Badge != BackgroundCheckBadge.None
+                && bc.BadgeExpiresAtUtc != null
+                && bc.BadgeExpiresAtUtc < nowUtc
+                && bc.CheckrProfileId != null
+            orderby bc.BadgeExpiresAtUtc
+            select new { Id = user.Id, BackgroundCheckBadgeExpiresAtUtc = bc.BadgeExpiresAtUtc })
             .Take(BatchSize)
-            .Select(user => new { user.Id, user.BackgroundCheckBadgeExpiresAtUtc })
             .ToListAsync(cancellationToken);
 
         if (dueForRenewal.Count == 0)

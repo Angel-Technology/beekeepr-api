@@ -49,8 +49,7 @@ public sealed class UserMutations
 
         var result = await userService.CreateAsync(new ApplicationCreateUserInput
         {
-            Email = input.Email,
-            DisplayName = input.DisplayName
+            Email = input.Email
         }, cancellationToken);
 
         if (result.EmailRequired)
@@ -352,41 +351,40 @@ public sealed class UserMutations
             new ApplicationUpdateProfileInput
             {
                 Nickname = input.Nickname,
-                Handle = input.Handle
+                Handle = input.Handle,
+                DisplayName = input.DisplayName,
+                ImageUrl = input.ImageUrl,
+                GoogleVoicePhone = input.GoogleVoicePhone,
+                WhatsAppPhone = input.WhatsAppPhone,
+                InstagramHandle = input.InstagramHandle,
+                TelegramHandle = input.TelegramHandle,
+                SnapchatHandle = input.SnapchatHandle,
+                SignalPhone = input.SignalPhone,
+                ProfileVisibility = input.ProfileVisibility,
+                ContactVisibility = input.ContactVisibility
             },
             cancellationToken);
 
         if (result.NicknameTooLong)
-        {
-            return new UpdateProfilePayload
-            {
-                Error = "Nickname must be 50 characters or fewer."
-            };
-        }
+            return new UpdateProfilePayload { Error = "Nickname must be 50 characters or fewer." };
 
         if (result.HandleInvalid)
-        {
-            return new UpdateProfilePayload
-            {
-                Error = "Handle must be 3-20 letters, numbers, or underscores."
-            };
-        }
+            return new UpdateProfilePayload { Error = "Handle must be 3-20 letters, numbers, or underscores." };
 
         if (result.HandleAlreadyTaken)
-        {
-            return new UpdateProfilePayload
-            {
-                Error = "That handle is already taken."
-            };
-        }
+            return new UpdateProfilePayload { Error = "That handle is already taken." };
+
+        if (result.DisplayNameTooLong)
+            return new UpdateProfilePayload { Error = "Display name must be 200 characters or fewer." };
+
+        if (result.ImageUrlTooLong)
+            return new UpdateProfilePayload { Error = "Image URL must be 2048 characters or fewer." };
+
+        if (result.ContactFieldTooLong)
+            return new UpdateProfilePayload { Error = "Contact handle must be 64 characters or fewer." };
 
         if (result.UserNotFound || !result.Success || result.User is null)
-        {
-            return new UpdateProfilePayload
-            {
-                Error = "Unable to update profile."
-            };
-        }
+            return new UpdateProfilePayload { Error = "Unable to update profile." };
 
         return new UpdateProfilePayload
         {
@@ -523,7 +521,8 @@ public sealed class UserMutations
             currentUser.User.Id,
             new Application.IdentityVerification.Models.StartInstantCriminalCheckInput
             {
-                PhoneNumber = input.PhoneNumber
+                PhoneNumber = input.PhoneNumber,
+                LicenseState = input.LicenseState
             },
             cancellationToken);
 

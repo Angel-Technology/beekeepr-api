@@ -35,15 +35,33 @@ public sealed class UserDto
 
     public string? VerifiedLicenseState { get; init; }
 
-    public string? PhoneNumber { get; init; }
-
     public DateTime? PersonaVerifiedAtUtc { get; init; }
 
     public BackgroundCheckBadge BackgroundCheckBadge { get; init; } = BackgroundCheckBadge.None;
 
     public DateTime? BackgroundCheckBadgeExpiresAtUtc { get; init; }
 
+    // When the most recent Checkr inquiry ran. Frontend uses this with BadgeExpiresAtUtc to
+    // drive the "your check is X days old, renews in Y" copy on the profile/verification screens.
+    public DateTime? CheckrLastCheckAtUtc { get; init; }
+
     public DateTime? TermsAcceptedAtUtc { get; init; }
+
+    public string? GoogleVoicePhone { get; init; }
+
+    public string? WhatsAppPhone { get; init; }
+
+    public string? InstagramHandle { get; init; }
+
+    public string? TelegramHandle { get; init; }
+
+    public string? SnapchatHandle { get; init; }
+
+    public string? SignalPhone { get; init; }
+
+    public ProfileVisibility ProfileVisibility { get; init; } = ProfileVisibility.Public;
+
+    public ContactVisibility ContactVisibility { get; init; } = ContactVisibility.Private;
 
     public SubscriptionDto Subscription { get; init; } = new();
 

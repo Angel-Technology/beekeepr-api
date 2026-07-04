@@ -42,14 +42,14 @@ public sealed class RevenueCatWebhookTests(PostgresFixture postgres) : IAsyncLif
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
 
         var stored = await ReloadAsync(user.Id);
-        Assert.Equal(SubscriptionStatus.Trialing, stored.SubscriptionStatus);
-        Assert.Equal("premium", stored.SubscriptionEntitlement);
-        Assert.Equal("premium_monthly", stored.SubscriptionProductId);
-        Assert.Equal(SubscriptionStore.AppStore, stored.SubscriptionStore);
-        Assert.Equal(true, stored.SubscriptionWillRenew);
-        Assert.NotNull(stored.SubscriptionCurrentPeriodEndUtc);
-        Assert.Equal(expiresAt, stored.SubscriptionCurrentPeriodEndUtc.Value, TimeSpan.FromSeconds(1));
-        Assert.Equal(user.Id.ToString(), stored.RevenueCatAppUserId);
+        Assert.Equal(SubscriptionStatus.Trialing, (stored.Subscription?.Status ?? SubscriptionStatus.None));
+        Assert.Equal("premium", stored.Subscription?.Entitlement);
+        Assert.Equal("premium_monthly", stored.Subscription!.ProductId);
+        Assert.Equal(SubscriptionStore.AppStore, stored.Subscription!.Store);
+        Assert.Equal(true, stored.Subscription!.WillRenew);
+        Assert.NotNull(stored.Subscription!.CurrentPeriodEndUtc);
+        Assert.Equal(expiresAt, stored.Subscription!.CurrentPeriodEndUtc.Value, TimeSpan.FromSeconds(1));
+        Assert.Equal(user.Id.ToString(), stored.Subscription!.RevenueCatAppUserId);
     }
 
     [Fact]
@@ -80,9 +80,9 @@ public sealed class RevenueCatWebhookTests(PostgresFixture postgres) : IAsyncLif
             BuzzKeeprApiFactory.RevenueCatWebhookToken);
 
         var stored = await ReloadAsync(user.Id);
-        Assert.Equal(SubscriptionStatus.Active, stored.SubscriptionStatus);
-        Assert.Equal(renewalExpiry, stored.SubscriptionCurrentPeriodEndUtc!.Value, TimeSpan.FromSeconds(1));
-        Assert.Equal(true, stored.SubscriptionWillRenew);
+        Assert.Equal(SubscriptionStatus.Active, (stored.Subscription?.Status ?? SubscriptionStatus.None));
+        Assert.Equal(renewalExpiry, stored.Subscription!.CurrentPeriodEndUtc!.Value, TimeSpan.FromSeconds(1));
+        Assert.Equal(true, stored.Subscription!.WillRenew);
     }
 
     [Fact]
@@ -113,9 +113,9 @@ public sealed class RevenueCatWebhookTests(PostgresFixture postgres) : IAsyncLif
             BuzzKeeprApiFactory.RevenueCatWebhookToken);
 
         var stored = await ReloadAsync(user.Id);
-        Assert.Equal(SubscriptionStatus.Cancelled, stored.SubscriptionStatus);
-        Assert.Equal(false, stored.SubscriptionWillRenew);
-        Assert.Equal(expiresAt, stored.SubscriptionCurrentPeriodEndUtc!.Value, TimeSpan.FromSeconds(1));
+        Assert.Equal(SubscriptionStatus.Cancelled, (stored.Subscription?.Status ?? SubscriptionStatus.None));
+        Assert.Equal(false, stored.Subscription!.WillRenew);
+        Assert.Equal(expiresAt, stored.Subscription!.CurrentPeriodEndUtc!.Value, TimeSpan.FromSeconds(1));
         Assert.True(SubscriptionDto.IsLocallyActive(stored), "Cancelled-but-not-yet-expired should still be locally active");
     }
 
@@ -134,8 +134,8 @@ public sealed class RevenueCatWebhookTests(PostgresFixture postgres) : IAsyncLif
             BuzzKeeprApiFactory.RevenueCatWebhookToken);
 
         var stored = await ReloadAsync(user.Id);
-        Assert.Equal(SubscriptionStatus.Expired, stored.SubscriptionStatus);
-        Assert.Equal(false, stored.SubscriptionWillRenew);
+        Assert.Equal(SubscriptionStatus.Expired, (stored.Subscription?.Status ?? SubscriptionStatus.None));
+        Assert.Equal(false, stored.Subscription!.WillRenew);
         Assert.False(SubscriptionDto.IsLocallyActive(stored));
     }
 
@@ -170,8 +170,8 @@ public sealed class RevenueCatWebhookTests(PostgresFixture postgres) : IAsyncLif
             BuzzKeeprApiFactory.RevenueCatWebhookToken);
 
         var stored = await ReloadAsync(user.Id);
-        Assert.Equal(SubscriptionStatus.Active, stored.SubscriptionStatus);
-        Assert.Equal(true, stored.SubscriptionWillRenew);
+        Assert.Equal(SubscriptionStatus.Active, (stored.Subscription?.Status ?? SubscriptionStatus.None));
+        Assert.Equal(true, stored.Subscription!.WillRenew);
     }
 
     [Fact]
@@ -191,8 +191,8 @@ public sealed class RevenueCatWebhookTests(PostgresFixture postgres) : IAsyncLif
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
 
         var stored = await ReloadAsync(user.Id);
-        Assert.Equal(SubscriptionStatus.None, stored.SubscriptionStatus);
-        Assert.Null(stored.SubscriptionEntitlement);
+        Assert.Equal(SubscriptionStatus.None, (stored.Subscription?.Status ?? SubscriptionStatus.None));
+        Assert.Null(stored.Subscription?.Entitlement);
     }
 
     [Fact]
@@ -234,7 +234,9 @@ public sealed class RevenueCatWebhookTests(PostgresFixture postgres) : IAsyncLif
     {
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
-        return await dbContext.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
+        return await dbContext.Users.AsNoTracking()
+            .Include(u => u.Subscription)
+            .FirstAsync(u => u.Id == userId);
     }
 
     private async Task<HttpResponseMessage> PostWebhookAsync(string body, string authorizationHeader)

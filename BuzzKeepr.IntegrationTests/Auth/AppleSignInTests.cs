@@ -43,7 +43,10 @@ public sealed class AppleSignInTests(PostgresFixture postgres) : IAsyncLifetime
         Assert.Null(payload.Error);
         Assert.Equal(email, payload.User!.Email);
         Assert.True(payload.User.EmailVerified);
-        Assert.Equal("Jane Apple", payload.User.DisplayName);
+        // App Store compliance: even though Apple includes the user's name on first
+        // authorization (and the frontend forwards it), we don't persist it. The user
+        // supplies a DisplayName themselves via the profile-completion flow.
+        Assert.Null(payload.User.DisplayName);
         Assert.False(string.IsNullOrEmpty(payload.Session!.Token));
 
         await using var scope = factory.Services.CreateAsyncScope();
@@ -131,8 +134,12 @@ public sealed class AppleSignInTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SignInWithApple_SecondSignIn_DoesNotOverwriteExistingDisplayName()
+    public async Task SignInWithApple_NeverCapturesDisplayNameFromClient()
     {
+        // App Store compliance: Apple sends the user's name on first authorization and the
+        // frontend forwards it via input.DisplayName, but we ignore it on purpose. The user
+        // supplies their DisplayName themselves through the profile-completion flow. Verify
+        // both first and subsequent sign-ins leave DisplayName null.
         const string firstToken = "apple-id-token-first";
         const string secondToken = "apple-id-token-second";
         var email = $"name-apple-{Guid.NewGuid():N}@buzzkeepr.test";
@@ -153,18 +160,15 @@ public sealed class AppleSignInTests(PostgresFixture postgres) : IAsyncLifetime
 
         var graphql = new GraphQLClient(factory.CreateClient());
 
-        // First sign-in: client forwards Apple's one-time name.
-        await graphql.SendAsync<SignInWithAppleData>(
+        var first = await graphql.SendAsync<SignInWithAppleData>(
             "mutation($input: SignInWithAppleInput!) { signInWithApple(input: $input) { user { id displayName } error } }",
             new { input = new { idToken = firstToken, displayName = "Original Name" } });
+        Assert.Null(first.RequireData().SignInWithApple.User!.DisplayName);
 
-        // Second sign-in: Apple omits the name; the client passes nothing.
         var second = await graphql.SendAsync<SignInWithAppleData>(
             "mutation($input: SignInWithAppleInput!) { signInWithApple(input: $input) { user { id displayName } error } }",
             new { input = new { idToken = secondToken } });
-
-        Assert.Null(second.RequireData().SignInWithApple.Error);
-        Assert.Equal("Original Name", second.RequireData().SignInWithApple.User!.DisplayName);
+        Assert.Null(second.RequireData().SignInWithApple.User!.DisplayName);
     }
 
     [Fact]

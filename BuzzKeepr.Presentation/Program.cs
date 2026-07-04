@@ -21,10 +21,8 @@ var isDevelopment = builder.Environment.IsDevelopment();
 builder.WebHost.UseSentry(options =>
 {
     options.Dsn = builder.Configuration["Sentry:Dsn"] ?? string.Empty;
-    // Env tag: explicit Sentry:Environment wins (so the develop Render service can tag events as
-    // "develop" while still running ASPNETCORE_ENVIRONMENT=Production). Falls back to .NET's env
-    // name when nothing is configured. Always lowercased so "Develop"/"develop" don't both show
-    // up as separate environments in Sentry's filter.
+    // Env tag: explicit Sentry:Environment wins, otherwise falls back to .NET's env name.
+    // Always lowercased so casing variants don't fan out as separate environments in Sentry.
     options.Environment = (builder.Configuration["Sentry:Environment"] ?? builder.Environment.EnvironmentName)
         .ToLowerInvariant();
     options.Release = typeof(Program).Assembly.GetName().Version?.ToString();
@@ -87,7 +85,10 @@ builder.Services
     .AddDiagnosticEventListener<BuzzKeepr.API.GraphQL.SentryGraphQLDiagnosticListener>()
     .AddQueryType<UserQueries>()
     .AddMutationType<UserMutations>()
-    .AddTypeExtension<BillingMutations>();
+    .AddTypeExtension<BillingMutations>()
+    .AddTypeExtension<ConnectionsMutations>()
+    .AddTypeExtension<ConnectionsQueries>()
+    .AddTypeExtension<NotificationMutations>();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>

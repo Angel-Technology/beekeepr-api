@@ -22,8 +22,11 @@ public sealed class GoogleSignInTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SignInWithGoogle_NewUser_CapturesImageUrlFromGoogle()
+    public async Task SignInWithGoogle_NewUser_DoesNotCaptureImageUrlFromGoogle()
     {
+        // App Store compliance: a provider-fetched avatar is the wrong source for the user's
+        // profile picture. Even when Google sends one, we ignore it — the user uploads their
+        // own through the profile flow.
         const string idToken = "google-id-token-image";
         var email = $"image-{Guid.NewGuid():N}@buzzkeepr.test";
         const string pictureUrl = "https://lh3.googleusercontent.com/a/test-picture-id";
@@ -43,12 +46,14 @@ public sealed class GoogleSignInTests(PostgresFixture postgres) : IAsyncLifetime
 
         var payload = response.RequireData().SignInWithGoogle;
         Assert.Null(payload.Error);
-        Assert.Equal(pictureUrl, payload.User!.ImageUrl);
+        Assert.Null(payload.User!.ImageUrl);
 
+        // No UserProfile row should be created at sign-in — there's nothing to store yet.
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
-        var user = await dbContext.Users.AsNoTracking().FirstAsync(u => u.Email == email);
-        Assert.Equal(pictureUrl, user.ImageUrl);
+        var profileExists = await dbContext.UserProfiles.AsNoTracking()
+            .AnyAsync(p => p.User!.Email == email);
+        Assert.False(profileExists);
     }
 
     [Fact]
@@ -73,7 +78,9 @@ public sealed class GoogleSignInTests(PostgresFixture postgres) : IAsyncLifetime
         Assert.Null(payload.Error);
         Assert.Equal(email, payload.User!.Email);
         Assert.True(payload.User.EmailVerified);
-        Assert.Equal("Jane Google", payload.User.DisplayName);
+        // Per App Store compliance, DisplayName is not captured from Google's payload anymore —
+        // the user fills it in later through the profile-completion flow.
+        Assert.Null(payload.User.DisplayName);
         Assert.False(string.IsNullOrEmpty(payload.Session!.Token));
 
         await using var scope = factory.Services.CreateAsyncScope();

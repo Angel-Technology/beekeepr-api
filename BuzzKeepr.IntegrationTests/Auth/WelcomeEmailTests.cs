@@ -71,8 +71,11 @@ public sealed class WelcomeEmailTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task GoogleSignIn_NewUser_SendsWelcome()
+    public async Task GoogleSignIn_NewUser_DefersWelcomeUntilProfileCompleted()
     {
+        // App Store compliance: we no longer capture DisplayName from Google. Even though
+        // Google's payload has a name, the welcome email defers until the user provides one
+        // through the profile-completion flow.
         const string idToken = "google-token-welcome";
         var email = $"welcome-google-{Guid.NewGuid():N}@buzzkeepr.test";
         factory.FakeGoogleVerifier.RegisterValidToken(idToken, new GoogleIdentity
@@ -88,50 +91,28 @@ public sealed class WelcomeEmailTests(PostgresFixture postgres) : IAsyncLifetime
             "mutation($input: SignInWithGoogleInput!) { signInWithGoogle(input: $input) { user { id } error } }",
             new { input = new { idToken } });
 
-        var sent = factory.FakeWelcomeSender.Sent.Single(w => w.Email == email);
-        Assert.Equal("Welcome Tester", sent.DisplayName);
+        Assert.DoesNotContain(factory.FakeWelcomeSender.Sent, w => w.Email == email);
     }
 
     [Fact]
-    public async Task CreateUser_SendsWelcomeAndStampsTimestamp()
+    public async Task CreateUser_DefersWelcomeUntilProfileCompleted()
     {
+        // Signup mutation takes email only — no DisplayName to greet by, so welcome defers
+        // to the sweeper which fires once a profile is filled in.
         var email = $"welcome-create-{Guid.NewGuid():N}@buzzkeepr.test";
         var graphql = new GraphQLClient(factory.CreateClient());
 
         var create = await graphql.SendAsync<CreateUserData>(
             "mutation($input: CreateUserInput!) { createUser(input: $input) { user { id } error } }",
-            new { input = new { email, displayName = "Created User" } });
+            new { input = new { email } });
 
         var userId = create.RequireData().CreateUser.User!.Id;
-        Assert.Contains(factory.FakeWelcomeSender.Sent, w => w.Email == email && w.DisplayName == "Created User");
-
-        await using var scope = factory.Services.CreateAsyncScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
-        var user = await dbContext.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
-        Assert.NotNull(user.WelcomeEmailSentAtUtc);
-    }
-
-    [Fact]
-    public async Task CreateUser_WhenWelcomeSendFails_LeavesTimestampNullForSweeper()
-    {
-        factory.FakeWelcomeSender.FailNextSendsWith(new InvalidOperationException("resend down"));
-
-        var email = $"welcome-fail-{Guid.NewGuid():N}@buzzkeepr.test";
-        var graphql = new GraphQLClient(factory.CreateClient());
-
-        var create = await graphql.SendAsync<CreateUserData>(
-            "mutation($input: CreateUserInput!) { createUser(input: $input) { user { id } error } }",
-            new { input = new { email, displayName = "Failing Welcome" } });
-
-        Assert.Null(create.RequireData().CreateUser.Error);
-        var userId = create.RequireData().CreateUser.User!.Id;
+        Assert.DoesNotContain(factory.FakeWelcomeSender.Sent, w => w.Email == email);
 
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
         var user = await dbContext.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
         Assert.Null(user.WelcomeEmailSentAtUtc);
-
-        factory.FakeWelcomeSender.StopFailing();
     }
 
     private sealed record VerifyData(VerifyPayload VerifyEmailSignIn);

@@ -23,10 +23,18 @@ public sealed class UserGraph
         VerifiedLastName = user.VerifiedLastName,
         VerifiedBirthdate = user.VerifiedBirthdate,
         VerifiedLicenseState = user.VerifiedLicenseState,
-        PhoneNumber = user.PhoneNumber,
+        GoogleVoicePhone = user.GoogleVoicePhone,
+        WhatsAppPhone = user.WhatsAppPhone,
+        InstagramHandle = user.InstagramHandle,
+        TelegramHandle = user.TelegramHandle,
+        SnapchatHandle = user.SnapchatHandle,
+        SignalPhone = user.SignalPhone,
+        ProfileVisibility = user.ProfileVisibility,
+        ContactVisibility = user.ContactVisibility,
         PersonaVerifiedAtUtc = user.PersonaVerifiedAtUtc,
         BackgroundCheckBadge = user.BackgroundCheckBadge,
         BackgroundCheckBadgeExpiresAtUtc = user.BackgroundCheckBadgeExpiresAtUtc,
+        CheckrLastCheckAtUtc = user.CheckrLastCheckAtUtc,
         TermsAcceptedAtUtc = user.TermsAcceptedAtUtc,
         Subscription = user.Subscription,
         CreatedAtUtc = user.CreatedAtUtc,
@@ -63,13 +71,29 @@ public sealed class UserGraph
 
     public string? VerifiedLicenseState { get; init; }
 
-    public string? PhoneNumber { get; init; }
+    public string? GoogleVoicePhone { get; init; }
+
+    public string? WhatsAppPhone { get; init; }
+
+    public string? InstagramHandle { get; init; }
+
+    public string? TelegramHandle { get; init; }
+
+    public string? SnapchatHandle { get; init; }
+
+    public string? SignalPhone { get; init; }
+
+    public ProfileVisibility ProfileVisibility { get; init; } = ProfileVisibility.Public;
+
+    public ContactVisibility ContactVisibility { get; init; } = ContactVisibility.Private;
 
     public DateTime? PersonaVerifiedAtUtc { get; init; }
 
     public BackgroundCheckBadge BackgroundCheckBadge { get; init; } = BackgroundCheckBadge.None;
 
     public DateTime? BackgroundCheckBadgeExpiresAtUtc { get; init; }
+
+    public DateTime? CheckrLastCheckAtUtc { get; init; }
 
     public DateTime? TermsAcceptedAtUtc { get; init; }
 

@@ -76,7 +76,7 @@ Open Banana Cake Pop at <http://localhost:5158/graphql>. All GraphQL ops below p
 curl http://localhost:5158/health
 # → "Healthy"
 
-curl http://localhost:5158/
+curl http://localhost:5158/to
 # → JSON with name, version, GraphQL/Swagger/Health URLs
 ```
 
@@ -109,15 +109,16 @@ mutation { verifyEmailSignIn(input: { email: "you@example.com", code: "12345" })
   error
 } }
 ```
-**Expect**: `error: null`, `user.emailVerified: true`, `session.token` is a 64-char hex string.
+**Expect**: `error: null`, `user.emailVerified: true`, `session.token` is a 64-char hex string. `user.displayName` and `user.imageUrl` are **`null`** — they only get populated once the user completes their profile (see phase 21). The frontend should treat null-displayName as the trigger to route to the profile-completion screen.
 
 **Save the token** — paste it into the Default HTTP Headers tab so all subsequent calls in this session carry it.
 
 **Verify side effects**:
 - DB: `SELECT * FROM "Sessions" WHERE "UserId"='<id>'` → one row, `expires_at` ~30 days out
-- DB: `SELECT "WelcomeEmailSentAtUtc" FROM "Users" WHERE "Id"='<id>'` → non-null timestamp
-- Inbox: welcome email arrives (welcome template), addressed to your `firstname`
-- Logs: should not see the welcome-email warning
+- DB: `SELECT "WelcomeEmailSentAtUtc" FROM "Users" WHERE "Id"='<id>'` → **NULL** (welcome email is deferred — there's no name to greet by yet)
+- DB: `SELECT 1 FROM "UserProfiles" WHERE "UserId"='<id>'` → **no row** (sub-aggregates are created lazily on first write)
+- Inbox: **no welcome email arrives yet** — the sweeper sends it within 15 min of the user filling in a DisplayName via `updateProfile` (phase 21)
+- Logs: no welcome-email send line on sign-in itself
 
 ---
 
@@ -185,12 +186,12 @@ Restart. Same email now lands on the real Resend path and the fixed PIN no longe
 
 ### Production setup (Render)
 
-Per `render.yaml`, both `buzzkeepr-api-prod` and `buzzkeepr-api-develop` declare two indexed reviewer slots with `sync: false`:
+Per `render.yaml`, `buzzkeepr-api-prod` declares two indexed reviewer slots with `sync: false`:
 
 - `Auth__ReviewAccounts__0__Email` / `Auth__ReviewAccounts__0__Pin`
 - `Auth__ReviewAccounts__1__Email` / `Auth__ReviewAccounts__1__Pin`
 
-Set Email + Pin per slot in Render UI → service → Environment, save (redeploys). The list shape (instead of an email-keyed dictionary) is required because **Render rejects env-var keys containing `@`**. To add additional reviewers, append a new pair of slots at the next index (`__2__`, `__3__`, …) to **both** services in `render.yaml`, commit + push, then set Email + Pin in Render UI. **Delete the slots from Render UI once review is approved** — long-lived fixed PINs are an audit liability.
+Set Email + Pin per slot in Render UI → service → Environment, save (redeploys). The list shape (instead of an email-keyed dictionary) is required because **Render rejects env-var keys containing `@`**. To add additional reviewers, append a new pair of slots at the next index (`__2__`, `__3__`, …) in `render.yaml`, commit + push, then set Email + Pin in Render UI. **Delete the slots from Render UI once review is approved** — long-lived fixed PINs are an audit liability.
 
 ---
 
@@ -198,17 +199,37 @@ Set Email + Pin per slot in Render UI → service → Environment, save (redeplo
 
 ### 5.1 `currentUser`
 
+The GraphQL shape is intentionally flat — internally the data comes from four sub-aggregates (`UserProfile`, `UserIdentityVerification`, `UserBackgroundCheck`, `UserSubscription`) that are created lazily, so for a fresh user most fields here are null. The schema split (PR 1) is invisible from the wire.
+
 ```graphql
 query { currentUser {
-  id email displayName imageUrl phoneNumber
+  id email
+  # Profile (UserProfile)
+  displayName nickname handle imageUrl phoneNumber
+  googleVoicePhone whatsAppPhone instagramHandle telegramHandle signalPhone
+  profileVisibility contactVisibility
+  # Identity verification (UserIdentityVerification)
   identityVerificationStatus personaInquiryId personaInquiryStatus
   verifiedFirstName verifiedMiddleName verifiedLastName verifiedBirthdate verifiedLicenseState
-  personaVerifiedAtUtc termsAcceptedAtUtc createdAtUtc
+  personaVerifiedAtUtc
+  # Background check (UserBackgroundCheck)
+  backgroundCheckBadge backgroundCheckBadgeExpiresAtUtc checkrLastCheckAtUtc
+  # Subscription (UserSubscription)
+  subscription { status entitlement productId store currentPeriodEndUtc willRenew isActive }
+  # Lifecycle (Users)
+  termsAcceptedAtUtc createdAtUtc
 } }
 ```
-**Expect**: full user object. All `verified*` fields and `personaInquiryId` are `null` (Persona not run yet).
+**Expect** for a fresh user:
+- All profile fields (`displayName`/`nickname`/`handle`/`imageUrl`/`phoneNumber`/social handles) → `null` until the user runs `updateProfile`.
+- `profileVisibility` → `PUBLIC` (default), `contactVisibility` → `PRIVATE` (default).
+- `identityVerificationStatus` → `NOT_STARTED`, all `verified*` and `personaInquiryId/Status` → `null`.
+- `backgroundCheckBadge` → `NONE`, `backgroundCheckBadgeExpiresAtUtc` → `null`, `checkrLastCheckAtUtc` → `null`.
+- `subscription.status` → `NONE`, `subscription.isActive` → `false`.
 
 Without the bearer header set: returns `null`.
+
+**Frontend routing pattern:** read the nullable signals on `currentUser` to decide which gate is next. Suggested order: accept terms → complete profile (displayName/handle) → identity verify (Persona) → background check (Checkr) → done.
 
 ### 5.2 `userById` — self
 
@@ -321,11 +342,11 @@ curl -i -X POST http://localhost:5158/graphql \
 Default dev: gate is open.
 
 ```graphql
-mutation { createUser(input: { email: "manual@example.com", displayName: "Manual" }) {
-  user { id email } error
+mutation { createUser(input: { email: "manual@example.com" }) {
+  user { id email displayName } error
 } }
 ```
-**Expect**: success.
+**Expect**: success, `user.displayName: null`. Signup is **email-only** now — the `displayName` input field was removed for App Store compliance (we no longer accept user-facing profile data at signup; the user supplies it via `updateProfile` in phase 21).
 
 To test the prod-style gate locally:
 ```bash
@@ -380,7 +401,12 @@ mutation { signInWithGoogle(input: { idToken: "eyJh..." }) {
   error
 } }
 ```
-**Expect**: `user.imageUrl` populated with your Google profile-picture URL. `external_accounts` row exists in DB with `Provider='Google'`. Welcome email sent (if first time for this email).
+**Expect**:
+- `user.email` populated, `user.emailVerified: true`, session token returned
+- **`user.displayName: null`** and **`user.imageUrl: null`** — Google's identity payload includes both, but PR 2 stopped capturing them. App Store reviewers flag apps that auto-populate user-facing profile fields from third-party providers; the user supplies these via `updateProfile`.
+- `external_accounts` row exists with `Provider='Google'`
+- **No welcome email** is sent inline — deferred to the sweeper (phase 17), same as email sign-in
+- `SELECT 1 FROM "UserProfiles" WHERE "UserId"='<id>'` → no row yet (sub-aggregate is lazy)
 
 ---
 
@@ -523,9 +549,19 @@ mutation { startInstantCriminalCheck(input: { phoneNumber: "+14155552671" }) {
 ```
 **Expect**: `success: true`, `checkId` and `profileId` are UUIDs, `error: null`.
 
-**Verify side effects**:
-- DB: `SELECT "CheckrProfileId", "CheckrLastCheckId", "CheckrLastCheckAtUtc", "CheckrLastCheckHasPossibleMatches", "PhoneNumber" FROM "Users" WHERE "Id"='<id>';` → all populated
-- Checkr Trust dashboard: a new check appears under your account, tied to a fresh profile
+**Verify side effects** (these fields live on sub-aggregates now — `Users` itself stays slim):
+```sql
+SELECT bc."CheckrProfileId", bc."CheckrLastCheckId", bc."CheckrLastCheckAtUtc",
+       bc."CheckrLastCheckHasPossibleMatches", bc."Badge", bc."BadgeExpiresAtUtc",
+       p."PhoneNumber"
+FROM "Users" u
+LEFT JOIN "UserBackgroundChecks" bc ON bc."UserId" = u."Id"
+LEFT JOIN "UserProfiles" p ON p."UserId" = u."Id"
+WHERE u."Id" = '<id>';
+```
+→ `UserBackgroundChecks` row populated (`Badge='Approved'`, `BadgeExpiresAtUtc` ~3 months out); `UserProfiles.PhoneNumber` set to the input.
+
+Checkr Trust dashboard: a new check appears under your account, tied to a fresh profile.
 
 ---
 
@@ -551,29 +587,38 @@ mutation { startInstantCriminalCheck(input: {}) { success error } }
 
 ## 16.5 Checkr — Denied path (test-env only)
 
-Skip if you're using prod credentials. With Checkr test creds + the deterministic mock profiles, you can verify the Denied badge end-to-end without making up names of real felons:
+Skip if you're using prod credentials. With Checkr test creds + the deterministic mock profiles, you can verify the Denied badge end-to-end without making up names of real felons.
+
+The PII writes go to `UserIdentityVerifications` (verified names) and the profile-reset goes to `UserBackgroundChecks` (Checkr profile id):
 
 ```sql
--- Force a re-PII-send by nulling the existing profile, swap the name to a mock that
--- produces records surviving our rulesets, and re-run. Restore afterward.
+-- Force a re-PII-send by nulling the existing Checkr profile, swap the verified name to
+-- a mock that produces records surviving our rulesets, and re-run. Restore afterward.
 -- David Thompson → sex offense + failure to register (felony ruleset hits → Denied)
-UPDATE "Users"
+UPDATE "UserIdentityVerifications" iv
 SET "VerifiedFirstName" = 'David',
     "VerifiedLastName"  = 'Thompson',
-    "VerifiedMiddleName"= NULL,
-    "CheckrProfileId"   = NULL,
+    "VerifiedMiddleName"= NULL
+FROM "Users" u
+WHERE iv."UserId" = u."Id" AND u."Email" = 'you@example.com';
+
+UPDATE "UserBackgroundChecks" bc
+SET "CheckrProfileId"   = NULL,
     "CheckrLastCheckId" = NULL
-WHERE "Email" = 'you@example.com';
+FROM "Users" u
+WHERE bc."UserId" = u."Id" AND u."Email" = 'you@example.com';
 ```
 
 Run `mutation { startInstantCriminalCheck(input: {}) { success hasPossibleMatches resultCount error } }`.
 
 **Expect**: `hasPossibleMatches: true`, `resultCount > 0`. After:
 ```sql
-SELECT "BackgroundCheckBadge", "BackgroundCheckBadgeExpiresAtUtc"
-FROM "Users" WHERE "Email" = 'you@example.com';
+SELECT bc."Badge", bc."BadgeExpiresAtUtc"
+FROM "UserBackgroundChecks" bc
+JOIN "Users" u ON u."Id" = bc."UserId"
+WHERE u."Email" = 'you@example.com';
 ```
-→ `BackgroundCheckBadge = Denied`, expiry stamped 3 months out.
+→ `Badge = 'Denied'`, expiry stamped 3 months out.
 
 Then restore your real verified identity (or do a fresh sign-in for a clean test user) before continuing.
 
@@ -620,13 +665,14 @@ curl -i -X POST http://localhost:5000/webhooks/revenuecat \
   }"
 ```
 
-**Expect:** `204 No Content`. Verify in DB:
+**Expect:** `204 No Content`. Subscription columns moved to `UserSubscriptions` in PR 1 — verify there:
 
 ```sql
-SELECT "SubscriptionStatus", "SubscriptionEntitlement", "SubscriptionProductId",
-       "SubscriptionStore", "SubscriptionWillRenew", "SubscriptionCurrentPeriodEndUtc",
-       "SubscriptionUpdatedAtUtc", "RevenueCatAppUserId"
-FROM "Users" WHERE "Id" = '<USER_ID>';
+SELECT sub."Status", sub."Entitlement", sub."ProductId",
+       sub."Store", sub."WillRenew", sub."CurrentPeriodEndUtc",
+       sub."UpdatedAtUtc", sub."RevenueCatAppUserId"
+FROM "UserSubscriptions" sub
+WHERE sub."UserId" = '<USER_ID>';
 ```
 
 → `Trialing`, `premium`, `premium_monthly`, `AppStore`, `true`, period-end ~7 days out, watermark stamped, app_user_id == users.id.
@@ -663,7 +709,7 @@ curl -i -X POST http://localhost:5000/webhooks/revenuecat \
   }"
 ```
 
-**Expect:** `204`. DB: `SubscriptionStatus` flips to `Active`, `SubscriptionCurrentPeriodEndUtc` advances ~30 days.
+**Expect:** `204`. `UserSubscriptions.Status` flips to `Active`, `UserSubscriptions.CurrentPeriodEndUtc` advances ~30 days.
 
 ### 16.6c Cancellation (user cancels but period still paid)
 
@@ -688,7 +734,7 @@ curl -i -X POST http://localhost:5000/webhooks/revenuecat \
   }"
 ```
 
-**Expect:** `204`. DB: status `Cancelled`, `WillRenew=false`, but `isActive: true` from GraphQL because the period hasn't ended yet (this is the right behavior — user keeps premium until period_end).
+**Expect:** `204`. `UserSubscriptions.Status = 'Cancelled'`, `WillRenew=false`, but `subscription.isActive: true` from GraphQL because the period hasn't ended yet (this is the right behavior — user keeps premium until period_end).
 
 ### 16.6d Stale event drop (out-of-order replay)
 
@@ -734,22 +780,15 @@ curl -i -X POST http://localhost:5000/webhooks/revenuecat \
 
 ### 16.6f Reset before next test run
 
+Deleting the `UserSubscriptions` row is the cleanest reset — application code reads `user.Subscription?.Status ?? None` so a missing row is identical to an unsubscribed user:
+
 ```sql
-UPDATE "Users"
-SET "SubscriptionStatus" = 'None',
-    "SubscriptionEntitlement" = NULL,
-    "SubscriptionProductId" = NULL,
-    "SubscriptionStore" = NULL,
-    "SubscriptionCurrentPeriodEndUtc" = NULL,
-    "SubscriptionWillRenew" = NULL,
-    "SubscriptionUpdatedAtUtc" = NULL,
-    "RevenueCatAppUserId" = NULL
-WHERE "Id" = '<USER_ID>';
+DELETE FROM "UserSubscriptions" WHERE "UserId" = '<USER_ID>';
 ```
 
 ### Notes
 
-- **Real RevenueCat → backend** can't be tested locally without a public URL. Use the develop Render service (`https://buzzkeepr-api-develop.onrender.com/webhooks/revenuecat`) configured in the RevenueCat dashboard, or expose localhost via cloudflared / ngrok. RevenueCat also has a "Send Test Event" button on each webhook config row that fires a `TEST` event — useful for confirming auth + reachability without needing a real purchase.
+- **Real RevenueCat → backend** can't be tested locally without a public URL. Either point the RevenueCat webhook at the prod Render service (`https://buzzkeepr-api-prod.onrender.com/webhooks/revenuecat`), or expose localhost via cloudflared / ngrok. RevenueCat also has a "Send Test Event" button on each webhook config row that fires a `TEST` event — useful for confirming auth + reachability without needing a real purchase.
 - **REST fallback path** (`IBillingService.GetSubscriptionForUserAsync`) isn't exercised through `currentUser`, which reads the mirror directly. It only fires when something explicitly calls the service — e.g. a future paid-surface gate. The integration tests cover it.
 
 ---
@@ -758,13 +797,14 @@ WHERE "Id" = '<USER_ID>';
 
 `BackgroundCheckRenewalBackgroundService` runs every 6 hours and re-runs the Checkr instant criminal check for any user with an existing `CheckrProfileId` and an expired badge. Subscription state is **not** a factor — the gate was removed. To trigger immediately without waiting:
 
-1. Make sure the user has a Checkr profile already (run phase 14 at least once).
-2. Force the badge expiry into the past:
+1. Make sure the user has a Checkr profile already (run phase 14 at least once) — this guarantees a `UserBackgroundChecks` row exists.
+2. Force the badge expiry into the past on the sub-aggregate:
 
 ```sql
-UPDATE "Users"
-SET "BackgroundCheckBadgeExpiresAtUtc" = now() - interval '1 hour'
-WHERE "Email" = 'you@example.com';
+UPDATE "UserBackgroundChecks" bc
+SET "BadgeExpiresAtUtc" = now() - interval '1 hour'
+FROM "Users" u
+WHERE bc."UserId" = u."Id" AND u."Email" = 'you@example.com';
 ```
 
 3. Restart the API — the sweeper runs immediately on host startup.
@@ -778,20 +818,31 @@ Background check renewal sweep: 1/1 renewed, 0 failed.
 5. Verify in DB:
 
 ```sql
-SELECT "BackgroundCheckBadge", "BackgroundCheckBadgeExpiresAtUtc",
-       "CheckrLastCheckId", "CheckrLastCheckAtUtc"
-FROM "Users" WHERE "Email" = 'you@example.com';
+SELECT bc."Badge", bc."BadgeExpiresAtUtc",
+       bc."CheckrLastCheckId", bc."CheckrLastCheckAtUtc"
+FROM "UserBackgroundChecks" bc
+JOIN "Users" u ON u."Id" = bc."UserId"
+WHERE u."Email" = 'you@example.com';
 ```
 
-→ `CheckrLastCheckId` is a fresh UUID, `CheckrLastCheckAtUtc` is just now, `BackgroundCheckBadgeExpiresAtUtc` is ~3 months in the future.
+→ `CheckrLastCheckId` is a fresh UUID, `CheckrLastCheckAtUtc` is just now, `BadgeExpiresAtUtc` is ~3 months in the future.
 
-**Verify subscription state is no longer a gate:** set `SubscriptionStatus = 'Expired'` alongside the expiry push-back and confirm the sweeper still renews. (Previously this was the negative case — now it's a regression check.)
+**Verify subscription state is no longer a gate:** add a `UserSubscriptions` row with `Status='Expired'` alongside the expiry push-back and confirm the sweeper still renews:
+
+```sql
+INSERT INTO "UserSubscriptions" ("UserId", "Status")
+SELECT u."Id", 'Expired' FROM "Users" u WHERE u."Email" = 'you@example.com'
+ON CONFLICT ("UserId") DO UPDATE SET "Status" = 'Expired';
+```
+(Previously this was the negative case — now it's a regression check.)
 
 ---
 
 ## 16.8 Identity-verification state recipes
 
-Quick one-shot UPDATEs to put your user into any meaningful verification state. Useful for exercising the frontend without having to walk a real ID through Persona + Checkr each time.
+Quick one-shot SQL recipes to put your user into any meaningful verification state. Useful for exercising the frontend without having to walk a real ID through Persona + Checkr each time.
+
+**Heads up about the schema split (PR 1):** identity-verification fields now live on `UserIdentityVerifications` and background-check fields on `UserBackgroundChecks`, not `Users`. Each recipe `INSERT … ON CONFLICT … DO UPDATE`s the right sub-aggregate(s) so it works whether or not a row already exists. Resetting means **deleting** sub-aggregate rows — the application reads `?.Status ?? NotStarted` and `?.Badge ?? None`, so a missing row is a clean "never started" state.
 
 Replace `you@example.com` with your address. Open psql once:
 
@@ -801,136 +852,227 @@ docker exec -it buzzkeepr-postgres psql -U postgres -d buzzkeepr_dev
 
 Then paste whichever state you need. Refetch `currentUser` on the frontend after each (sign-out/in or pull-to-refresh) — most clients cache it.
 
+### Create empty sub-aggregate rows (so you can UPDATE them later)
+
+The recipes below use `INSERT … ON CONFLICT … DO UPDATE` so they work whether or not a row already exists. But if you'd rather work in plain `UPDATE` statements — e.g. flipping a single field at a time from a SQL client — run these once first. They create empty rows with column defaults; running again is a no-op.
+
+```sql
+-- Empty UserIdentityVerifications row (Status defaults to 'NotStarted', everything else NULL).
+INSERT INTO "UserIdentityVerifications" ("UserId")
+SELECT "Id" FROM "Users" WHERE "Email" = 'you@example.com'
+ON CONFLICT ("UserId") DO NOTHING;
+
+-- Empty UserBackgroundChecks row (Badge defaults to 'None', everything else NULL).
+INSERT INTO "UserBackgroundChecks" ("UserId")
+SELECT "Id" FROM "Users" WHERE "Email" = 'you@example.com'
+ON CONFLICT ("UserId") DO NOTHING;
+
+-- Empty UserProfiles row (all profile fields NULL, visibility defaults to PUBLIC / PRIVATE).
+INSERT INTO "UserProfiles" ("UserId", "CreatedAtUtc")
+SELECT "Id", now() FROM "Users" WHERE "Email" = 'you@example.com'
+ON CONFLICT ("UserId") DO NOTHING;
+
+-- Empty UserSubscriptions row (Status defaults to 'None').
+INSERT INTO "UserSubscriptions" ("UserId")
+SELECT "Id" FROM "Users" WHERE "Email" = 'you@example.com'
+ON CONFLICT ("UserId") DO NOTHING;
+```
+
+Now you can do simple targeted updates like:
+
+```sql
+-- Flip one field on UserIdentityVerifications
+UPDATE "UserIdentityVerifications" iv
+SET "Status" = 'Approved', "VerifiedFirstName" = 'Test', "VerifiedLastName" = 'User'
+FROM "Users" u
+WHERE iv."UserId" = u."Id" AND u."Email" = 'you@example.com';
+
+-- Flip one field on UserBackgroundChecks
+UPDATE "UserBackgroundChecks" bc
+SET "Badge" = 'Approved', "BadgeExpiresAtUtc" = now() + interval '3 months'
+FROM "Users" u
+WHERE bc."UserId" = u."Id" AND u."Email" = 'you@example.com';
+```
+
+If you want to wipe state and start clean, see the **Reset to "just signed up"** recipe below — it deletes the rows and the application code reads `null → default-enum-value` so it's identical to a brand-new user.
+
 **Quick state-check (run any time):**
 
 ```sql
-SELECT "Email", "IdentityVerificationStatus", "PersonaInquiryStatus",
-       "BackgroundCheckBadge", "BackgroundCheckBadgeExpiresAtUtc",
-       "CheckrLastCheckHasPossibleMatches"
-FROM "Users" WHERE "Email" = 'you@example.com';
+SELECT u."Email",
+       iv."Status" AS identity_status, iv."PersonaInquiryStatus",
+       bc."Badge" AS background_badge, bc."BadgeExpiresAtUtc",
+       bc."CheckrLastCheckHasPossibleMatches"
+FROM "Users" u
+LEFT JOIN "UserIdentityVerifications" iv ON iv."UserId" = u."Id"
+LEFT JOIN "UserBackgroundChecks" bc ON bc."UserId" = u."Id"
+WHERE u."Email" = 'you@example.com';
 ```
 
 ### Reset to "just signed up"
 
+Delete the sub-aggregates and the user is back to the fresh-signup state. `UserProfiles` is wiped too so `displayName`/`handle` reset (re-test the profile-completion flow from scratch). Subscription is left alone — clear it via phase 16.6f if you also need that reset.
+
 ```sql
-UPDATE "Users"
-SET "IdentityVerificationStatus" = 'NotStarted',
-    "PersonaInquiryId" = NULL, "PersonaInquiryStatus" = NULL,
-    "PersonaInquiryUpdatedAtUtc" = NULL, "PersonaVerifiedAtUtc" = NULL,
-    "VerifiedFirstName" = NULL, "VerifiedMiddleName" = NULL, "VerifiedLastName" = NULL,
-    "VerifiedBirthdate" = NULL, "VerifiedLicenseState" = NULL, "PhoneNumber" = NULL,
-    "CheckrProfileId" = NULL, "CheckrLastCheckId" = NULL,
-    "CheckrLastCheckAtUtc" = NULL, "CheckrLastCheckHasPossibleMatches" = NULL,
-    "BackgroundCheckBadge" = 'None', "BackgroundCheckBadgeExpiresAtUtc" = NULL
-WHERE "Email" = 'you@example.com';
+WITH target AS (SELECT "Id" FROM "Users" WHERE "Email" = 'you@example.com')
+DELETE FROM "UserProfiles" WHERE "UserId" IN (SELECT "Id" FROM target);
+
+WITH target AS (SELECT "Id" FROM "Users" WHERE "Email" = 'you@example.com')
+DELETE FROM "UserIdentityVerifications" WHERE "UserId" IN (SELECT "Id" FROM target);
+
+WITH target AS (SELECT "Id" FROM "Users" WHERE "Email" = 'you@example.com')
+DELETE FROM "UserBackgroundChecks" WHERE "UserId" IN (SELECT "Id" FROM target);
 ```
 
 ### Persona Pending (started but not finished)
 
 ```sql
-UPDATE "Users"
-SET "IdentityVerificationStatus" = 'Pending',
+INSERT INTO "UserIdentityVerifications" ("UserId", "Status", "PersonaInquiryId", "PersonaInquiryStatus", "PersonaInquiryUpdatedAtUtc")
+SELECT "Id", 'Pending', 'inq_test_pending', 'Pending', now()
+FROM "Users" WHERE "Email" = 'you@example.com'
+ON CONFLICT ("UserId") DO UPDATE
+SET "Status" = 'Pending',
     "PersonaInquiryId" = 'inq_test_pending',
     "PersonaInquiryStatus" = 'Pending',
     "PersonaInquiryUpdatedAtUtc" = now(),
     "PersonaVerifiedAtUtc" = NULL,
     "VerifiedFirstName" = NULL, "VerifiedMiddleName" = NULL, "VerifiedLastName" = NULL,
-    "VerifiedBirthdate" = NULL, "VerifiedLicenseState" = NULL,
-    "CheckrProfileId" = NULL, "CheckrLastCheckId" = NULL,
-    "CheckrLastCheckAtUtc" = NULL, "CheckrLastCheckHasPossibleMatches" = NULL,
-    "BackgroundCheckBadge" = 'None', "BackgroundCheckBadgeExpiresAtUtc" = NULL
-WHERE "Email" = 'you@example.com';
+    "VerifiedBirthdate" = NULL, "VerifiedLicenseState" = NULL;
+
+-- Background check should be absent for this state
+WITH target AS (SELECT "Id" FROM "Users" WHERE "Email" = 'you@example.com')
+DELETE FROM "UserBackgroundChecks" WHERE "UserId" IN (SELECT "Id" FROM target);
 ```
 
 ### Persona Declined (retryable — user can re-run `startPersonaInquiry`)
 
 ```sql
-UPDATE "Users"
-SET "IdentityVerificationStatus" = 'Declined',
+INSERT INTO "UserIdentityVerifications" ("UserId", "Status", "PersonaInquiryId", "PersonaInquiryStatus", "PersonaInquiryUpdatedAtUtc")
+SELECT "Id", 'Declined', 'inq_test_declined', 'Declined', now()
+FROM "Users" WHERE "Email" = 'you@example.com'
+ON CONFLICT ("UserId") DO UPDATE
+SET "Status" = 'Declined',
     "PersonaInquiryId" = 'inq_test_declined',
     "PersonaInquiryStatus" = 'Declined',
     "PersonaInquiryUpdatedAtUtc" = now(),
     "PersonaVerifiedAtUtc" = NULL,
     "VerifiedFirstName" = NULL, "VerifiedMiddleName" = NULL, "VerifiedLastName" = NULL,
-    "VerifiedBirthdate" = NULL, "VerifiedLicenseState" = NULL,
-    "CheckrProfileId" = NULL, "CheckrLastCheckId" = NULL,
-    "CheckrLastCheckAtUtc" = NULL, "CheckrLastCheckHasPossibleMatches" = NULL,
-    "BackgroundCheckBadge" = 'None', "BackgroundCheckBadgeExpiresAtUtc" = NULL
-WHERE "Email" = 'you@example.com';
+    "VerifiedBirthdate" = NULL, "VerifiedLicenseState" = NULL;
+
+WITH target AS (SELECT "Id" FROM "Users" WHERE "Email" = 'you@example.com')
+DELETE FROM "UserBackgroundChecks" WHERE "UserId" IN (SELECT "Id" FROM target);
 ```
 
 ### Persona NeedsReview (submitted, Persona flagged for human)
 
 ```sql
-UPDATE "Users"
-SET "IdentityVerificationStatus" = 'NeedsReview',
+INSERT INTO "UserIdentityVerifications" ("UserId", "Status", "PersonaInquiryId", "PersonaInquiryStatus",
+    "PersonaInquiryUpdatedAtUtc", "PersonaVerifiedAtUtc",
+    "VerifiedFirstName", "VerifiedLastName", "VerifiedBirthdate", "VerifiedLicenseState")
+SELECT "Id", 'NeedsReview', 'inq_test_review', 'NeedsReview',
+    now(), now(),
+    'Test', 'User', '1995-01-15', 'NY'
+FROM "Users" WHERE "Email" = 'you@example.com'
+ON CONFLICT ("UserId") DO UPDATE
+SET "Status" = 'NeedsReview',
     "PersonaInquiryId" = 'inq_test_review',
     "PersonaInquiryStatus" = 'NeedsReview',
     "PersonaInquiryUpdatedAtUtc" = now(),
     "PersonaVerifiedAtUtc" = now(),
     "VerifiedFirstName" = 'Test', "VerifiedLastName" = 'User',
-    "VerifiedBirthdate" = '1995-01-15', "VerifiedLicenseState" = 'NY',
-    "CheckrProfileId" = NULL, "CheckrLastCheckId" = NULL,
-    "CheckrLastCheckAtUtc" = NULL, "CheckrLastCheckHasPossibleMatches" = NULL,
-    "BackgroundCheckBadge" = 'None', "BackgroundCheckBadgeExpiresAtUtc" = NULL
-WHERE "Email" = 'you@example.com';
+    "VerifiedBirthdate" = '1995-01-15', "VerifiedLicenseState" = 'NY';
+
+WITH target AS (SELECT "Id" FROM "Users" WHERE "Email" = 'you@example.com')
+DELETE FROM "UserBackgroundChecks" WHERE "UserId" IN (SELECT "Id" FROM target);
 ```
 
 ### Partial — Persona Approved, Checkr not yet run
 
 ```sql
-UPDATE "Users"
-SET "IdentityVerificationStatus" = 'Approved',
+INSERT INTO "UserIdentityVerifications" ("UserId", "Status", "PersonaInquiryId", "PersonaInquiryStatus",
+    "PersonaInquiryUpdatedAtUtc", "PersonaVerifiedAtUtc",
+    "VerifiedFirstName", "VerifiedLastName", "VerifiedBirthdate", "VerifiedLicenseState")
+SELECT "Id", 'Approved', 'inq_test_partial', 'Approved',
+    now(), now(),
+    'Test', 'User', '1995-01-15', 'NY'
+FROM "Users" WHERE "Email" = 'you@example.com'
+ON CONFLICT ("UserId") DO UPDATE
+SET "Status" = 'Approved',
     "PersonaInquiryId" = 'inq_test_partial',
     "PersonaInquiryStatus" = 'Approved',
     "PersonaInquiryUpdatedAtUtc" = now(),
     "PersonaVerifiedAtUtc" = now(),
     "VerifiedFirstName" = 'Test', "VerifiedLastName" = 'User',
-    "VerifiedBirthdate" = '1995-01-15', "VerifiedLicenseState" = 'NY',
-    "CheckrProfileId" = NULL, "CheckrLastCheckId" = NULL,
-    "CheckrLastCheckAtUtc" = NULL, "CheckrLastCheckHasPossibleMatches" = NULL,
-    "BackgroundCheckBadge" = 'None', "BackgroundCheckBadgeExpiresAtUtc" = NULL
-WHERE "Email" = 'you@example.com';
+    "VerifiedBirthdate" = '1995-01-15', "VerifiedLicenseState" = 'NY';
+
+WITH target AS (SELECT "Id" FROM "Users" WHERE "Email" = 'you@example.com')
+DELETE FROM "UserBackgroundChecks" WHERE "UserId" IN (SELECT "Id" FROM target);
 ```
 
 ### Passed — Persona Approved + Checkr clean → Approved badge
 
 ```sql
-UPDATE "Users"
-SET "IdentityVerificationStatus" = 'Approved',
+INSERT INTO "UserIdentityVerifications" ("UserId", "Status", "PersonaInquiryId", "PersonaInquiryStatus",
+    "PersonaInquiryUpdatedAtUtc", "PersonaVerifiedAtUtc",
+    "VerifiedFirstName", "VerifiedLastName", "VerifiedBirthdate", "VerifiedLicenseState")
+SELECT "Id", 'Approved', 'inq_test_passed', 'Approved',
+    now(), now(),
+    'Test', 'User', '1995-01-15', 'NY'
+FROM "Users" WHERE "Email" = 'you@example.com'
+ON CONFLICT ("UserId") DO UPDATE
+SET "Status" = 'Approved',
     "PersonaInquiryId" = 'inq_test_passed',
     "PersonaInquiryStatus" = 'Approved',
     "PersonaInquiryUpdatedAtUtc" = now(),
     "PersonaVerifiedAtUtc" = now(),
     "VerifiedFirstName" = 'Test', "VerifiedLastName" = 'User',
-    "VerifiedBirthdate" = '1995-01-15', "VerifiedLicenseState" = 'NY',
-    "CheckrProfileId" = 'prf_test_passed',
+    "VerifiedBirthdate" = '1995-01-15', "VerifiedLicenseState" = 'NY';
+
+INSERT INTO "UserBackgroundChecks" ("UserId", "CheckrProfileId", "CheckrLastCheckId",
+    "CheckrLastCheckAtUtc", "CheckrLastCheckHasPossibleMatches", "Badge", "BadgeExpiresAtUtc")
+SELECT "Id", 'prf_test_passed', 'chk_test_passed',
+    now(), false, 'Approved', now() + interval '3 months'
+FROM "Users" WHERE "Email" = 'you@example.com'
+ON CONFLICT ("UserId") DO UPDATE
+SET "CheckrProfileId" = 'prf_test_passed',
     "CheckrLastCheckId" = 'chk_test_passed',
     "CheckrLastCheckAtUtc" = now(),
     "CheckrLastCheckHasPossibleMatches" = false,
-    "BackgroundCheckBadge" = 'Approved',
-    "BackgroundCheckBadgeExpiresAtUtc" = now() + interval '3 months'
-WHERE "Email" = 'you@example.com';
+    "Badge" = 'Approved',
+    "BadgeExpiresAtUtc" = now() + interval '3 months';
 ```
 
 ### Failed — Persona Approved + Checkr matches → Denied badge
 
 ```sql
-UPDATE "Users"
-SET "IdentityVerificationStatus" = 'Approved',
+INSERT INTO "UserIdentityVerifications" ("UserId", "Status", "PersonaInquiryId", "PersonaInquiryStatus",
+    "PersonaInquiryUpdatedAtUtc", "PersonaVerifiedAtUtc",
+    "VerifiedFirstName", "VerifiedLastName", "VerifiedBirthdate", "VerifiedLicenseState")
+SELECT "Id", 'Approved', 'inq_test_failed', 'Approved',
+    now(), now(),
+    'Test', 'User', '1995-01-15', 'NY'
+FROM "Users" WHERE "Email" = 'you@example.com'
+ON CONFLICT ("UserId") DO UPDATE
+SET "Status" = 'Approved',
     "PersonaInquiryId" = 'inq_test_failed',
     "PersonaInquiryStatus" = 'Approved',
     "PersonaInquiryUpdatedAtUtc" = now(),
     "PersonaVerifiedAtUtc" = now(),
     "VerifiedFirstName" = 'Test', "VerifiedLastName" = 'User',
-    "VerifiedBirthdate" = '1995-01-15', "VerifiedLicenseState" = 'NY',
-    "CheckrProfileId" = 'prf_test_failed',
+    "VerifiedBirthdate" = '1995-01-15', "VerifiedLicenseState" = 'NY';
+
+INSERT INTO "UserBackgroundChecks" ("UserId", "CheckrProfileId", "CheckrLastCheckId",
+    "CheckrLastCheckAtUtc", "CheckrLastCheckHasPossibleMatches", "Badge", "BadgeExpiresAtUtc")
+SELECT "Id", 'prf_test_failed', 'chk_test_failed',
+    now(), true, 'Denied', now() + interval '3 months'
+FROM "Users" WHERE "Email" = 'you@example.com'
+ON CONFLICT ("UserId") DO UPDATE
+SET "CheckrProfileId" = 'prf_test_failed',
     "CheckrLastCheckId" = 'chk_test_failed',
     "CheckrLastCheckAtUtc" = now(),
     "CheckrLastCheckHasPossibleMatches" = true,
-    "BackgroundCheckBadge" = 'Denied',
-    "BackgroundCheckBadgeExpiresAtUtc" = now() + interval '3 months'
-WHERE "Email" = 'you@example.com';
+    "Badge" = 'Denied',
+    "BadgeExpiresAtUtc" = now() + interval '3 months';
 ```
 
 ### Expired badge (was Approved, now past expiry)
@@ -938,24 +1080,37 @@ WHERE "Email" = 'you@example.com';
 Use this to test the "renew your check" UX or to manually trigger the renewal sweeper (phase 16.7).
 
 ```sql
-UPDATE "Users"
-SET "IdentityVerificationStatus" = 'Approved',
+INSERT INTO "UserIdentityVerifications" ("UserId", "Status", "PersonaInquiryId", "PersonaInquiryStatus",
+    "PersonaInquiryUpdatedAtUtc", "PersonaVerifiedAtUtc",
+    "VerifiedFirstName", "VerifiedLastName", "VerifiedBirthdate", "VerifiedLicenseState")
+SELECT "Id", 'Approved', 'inq_test_expired', 'Approved',
+    now() - interval '4 months', now() - interval '4 months',
+    'Test', 'User', '1995-01-15', 'NY'
+FROM "Users" WHERE "Email" = 'you@example.com'
+ON CONFLICT ("UserId") DO UPDATE
+SET "Status" = 'Approved',
     "PersonaInquiryId" = 'inq_test_expired',
     "PersonaInquiryStatus" = 'Approved',
     "PersonaInquiryUpdatedAtUtc" = now() - interval '4 months',
     "PersonaVerifiedAtUtc" = now() - interval '4 months',
     "VerifiedFirstName" = 'Test', "VerifiedLastName" = 'User',
-    "VerifiedBirthdate" = '1995-01-15', "VerifiedLicenseState" = 'NY',
-    "CheckrProfileId" = 'prf_test_expired',
+    "VerifiedBirthdate" = '1995-01-15', "VerifiedLicenseState" = 'NY';
+
+INSERT INTO "UserBackgroundChecks" ("UserId", "CheckrProfileId", "CheckrLastCheckId",
+    "CheckrLastCheckAtUtc", "CheckrLastCheckHasPossibleMatches", "Badge", "BadgeExpiresAtUtc")
+SELECT "Id", 'prf_test_expired', 'chk_test_expired',
+    now() - interval '4 months', false, 'Approved', now() - interval '1 day'
+FROM "Users" WHERE "Email" = 'you@example.com'
+ON CONFLICT ("UserId") DO UPDATE
+SET "CheckrProfileId" = 'prf_test_expired',
     "CheckrLastCheckId" = 'chk_test_expired',
     "CheckrLastCheckAtUtc" = now() - interval '4 months',
     "CheckrLastCheckHasPossibleMatches" = false,
-    "BackgroundCheckBadge" = 'Approved',
-    "BackgroundCheckBadgeExpiresAtUtc" = now() - interval '1 day'
-WHERE "Email" = 'you@example.com';
+    "Badge" = 'Approved',
+    "BadgeExpiresAtUtc" = now() - interval '1 day';
 ```
 
-> **Heads up — the renewal sweeper will eat synthetic CheckrProfileIds.** The fake `prf_test_*` ids above won't exist in Checkr, so when `BackgroundCheckRenewalBackgroundService` next runs (every 6 hours, plus on each API start) it will call Checkr with `profile_id=prf_test_expired` and fail. The check stays in its current state and the sweeper retries next pass. If that's noisy, either clear `CheckrProfileId` after the test or stop the API while testing.
+> **Heads up — the renewal sweeper will eat synthetic CheckrProfileIds.** The fake `prf_test_*` ids above won't exist in Checkr, so when `BackgroundCheckRenewalBackgroundService` next runs (every 6 hours, plus on each API start) it will call Checkr with `profile_id=prf_test_expired` and fail. The check stays in its current state and the sweeper retries next pass. If that's noisy, either clear `UserBackgroundChecks.CheckrProfileId` after the test or stop the API while testing.
 
 ---
 
@@ -971,20 +1126,45 @@ If the DSN is blank or unset, the Sentry SDK is a no-op (no events sent, no erro
 
 ## 17. Welcome email sweeper (safety-net)
 
-Simulate a missed welcome email:
+After PR 2, the sweeper is the **primary** delivery path — no signup flow sends a welcome inline anymore. It picks up users who have a name to greet by, which after the schema split is one of:
+- `UserProfiles.DisplayName` (user typed it via `updateProfile`)
+- `UserIdentityVerifications.VerifiedFirstName` (Persona webhook landed)
+
+Simulate the "user completed their profile but the inline send didn't fire" case:
+
 ```sql
+-- Ensure WelcomeEmailSentAtUtc is null and the user is past the 5-min inline grace window
 UPDATE "Users"
 SET "WelcomeEmailSentAtUtc" = NULL,
     "CreatedAtUtc" = now() - interval '10 minutes'
 WHERE "Email" = 'you@example.com';
+
+-- Make sure the user has a name to greet by — UserProfile.DisplayName satisfies the sweeper
+INSERT INTO "UserProfiles" ("UserId", "DisplayName", "CreatedAtUtc")
+SELECT "Id", 'Sweeper Test', now()
+FROM "Users" WHERE "Email" = 'you@example.com'
+ON CONFLICT ("UserId") DO UPDATE SET "DisplayName" = 'Sweeper Test';
 ```
+
 Wait up to 15 min, **or** restart the API to trigger an immediate sweep on startup.
 
 Watch logs for:
 ```
 Welcome email sweep delivered 1/1 pending welcomes.
 ```
-Inbox: welcome email arrives. DB: `WelcomeEmailSentAtUtc` is now non-null.
+Inbox: welcome email arrives, greeting "Sweeper Test". DB: `Users.WelcomeEmailSentAtUtc` is now non-null.
+
+**Negative case** — confirm the sweeper skips users with no greetable name:
+
+```sql
+-- Wipe profile + identity verification entirely
+WITH target AS (SELECT "Id" FROM "Users" WHERE "Email" = 'you@example.com')
+DELETE FROM "UserProfiles" WHERE "UserId" IN (SELECT "Id" FROM target);
+WITH target AS (SELECT "Id" FROM "Users" WHERE "Email" = 'you@example.com')
+DELETE FROM "UserIdentityVerifications" WHERE "UserId" IN (SELECT "Id" FROM target);
+UPDATE "Users" SET "WelcomeEmailSentAtUtc" = NULL WHERE "Email" = 'you@example.com';
+```
+Restart. Logs: no welcome delivered. `WelcomeEmailSentAtUtc` stays NULL. This is the email-sign-in default for a brand-new user — the sweeper waits for them to fill in a name.
 
 ---
 
@@ -1003,6 +1183,252 @@ And the row is gone.
 
 ---
 
+## 21. Profile completion + visibility (PR 2)
+
+The Figma "My Profile" screen writes to `updateProfile`. This phase exercises every field, the visibility enums, and the search-exclusion behavior. All data lives on `UserProfiles` — `Users` is untouched by any operation in this phase.
+
+### 21.1 Profile starts empty after sign-up
+
+```graphql
+query { currentUser {
+  displayName nickname handle imageUrl phoneNumber
+  googleVoicePhone whatsAppPhone instagramHandle telegramHandle signalPhone
+  profileVisibility contactVisibility
+} }
+```
+**Expect**: every profile field is `null`; `profileVisibility: PUBLIC` (default); `contactVisibility: PRIVATE` (default). Defaults come from the column defaults, not from a real `UserProfiles` row — there isn't one yet.
+
+DB confirms: `SELECT 1 FROM "UserProfiles" WHERE "UserId"='<id>'` → no row.
+
+### 21.2 Profile section — Nickname + Handle
+
+```graphql
+mutation { updateProfile(input: {
+  nickname: "Sammy"
+  handle: "sammy"
+}) { user { nickname handle } error } }
+```
+**Expect**: `error: null`, fields returned as set. DB now has a `UserProfiles` row.
+
+**Negative cases:**
+- Handle with bad chars: `handle: "bad handle!"` → `error: "Handle must be 3-20 letters, numbers, or underscores."`
+- Handle taken: sign in as a second user, try `handle: "sammy"` → `error: "That handle is already taken."`
+- Nickname too long (>50 chars) → `error: "Nickname must be 50 characters or fewer."`
+
+### 21.3 Contact info — phones + social handles
+
+```graphql
+mutation { updateProfile(input: {
+  phoneNumber:      "(415) 555-2671"
+  googleVoicePhone: "(415) 555-1212"
+  whatsAppPhone:    "+1 415 555 9999"
+  instagramHandle:  "@sammyinsta"
+  telegramHandle:   "sammytelegram"
+  signalPhone:      "+14155551234"
+}) { user {
+  phoneNumber googleVoicePhone whatsAppPhone
+  instagramHandle telegramHandle signalPhone
+} error } }
+```
+**Expect**: all fields returned exactly as sent, **except** `instagramHandle` and `telegramHandle` — the leading `@` is stripped server-side (canonical storage; the display layer should prepend `@` on render). So `instagramHandle: "sammyinsta"`, `telegramHandle: "sammytelegram"`.
+
+**Negative cases:**
+- Phone over 32 chars → `error: "Phone number must be 32 characters or fewer."`
+- Social handle over 64 chars → `error: "Contact handle must be 64 characters or fewer."`
+
+### 21.4 Clearing a field
+
+Empty string clears, `null` no-ops:
+```graphql
+mutation { updateProfile(input: { instagramHandle: "" }) { user { instagramHandle } } }
+```
+**Expect**: `instagramHandle: null`. Other fields untouched.
+
+### 21.5 Image URL
+
+```graphql
+mutation { updateProfile(input: { imageUrl: "https://cdn.example.com/avatars/sam.png" })
+  { user { imageUrl } error } }
+```
+**Expect**: URL stored as-is. Backend doesn't validate URL format — the frontend uploads to its own storage and hands us the resulting string. Length cap is 2048; over that returns `"Image URL must be 2048 characters or fewer."`.
+
+### 21.6 ProfileVisibility — Private removes from search
+
+```graphql
+# As user A: become private
+mutation { updateProfile(input: { profileVisibility: PRIVATE }) { user { profileVisibility } } }
+
+# As user B (different session): search by user A's handle
+query { searchUsers(query: "sammy", first: 10) { edges { node { id handle } } } }
+```
+**Expect**: user A does **not** appear in user B's results, even on an exact handle match. Friend requests still work if user B already knows the handle (out-of-band share) — try `sendFriendRequest` with user A's id, expect success.
+
+Flip back to `PUBLIC` and rerun search → user A reappears.
+
+### 21.7 ContactVisibility enforcement
+
+`contactVisibility` accepts two values: `CONNECTIONS_ONLY` and `PRIVATE`. The `Public` value was removed in PR 3 — contact info no longer flows to strangers via any code path. The gate is enforced server-side in the SQL projections of `searchUsers` and all four connection list queries (see ARCHITECTURE.md → Social Graph → Contact-visibility gating).
+
+Verify in Banana Cake Pop:
+- As caller A, search for user B who has `contactVisibility: CONNECTIONS_ONLY` and is not your friend → all 6 contact fields return `null`.
+- Befriend B (`sendFriendRequest` then `acceptFriendRequest`) → re-run search → contact fields now return real values.
+- Flip B's `contactVisibility` to `PRIVATE` via `updateProfile` (as B) → re-run search as A (still a friend) → contact fields return `null` again. Verifies strict gating.
+
+Sending `contactVisibility: PUBLIC` to `updateProfile` returns a GraphQL schema-validation error — the enum value no longer exists. Frontend must drop any code path that sets it.
+
+### 21.8 The whole profile in one call
+
+```graphql
+mutation { updateProfile(input: {
+  displayName: "Sammy Wemimo"
+  nickname: "Sammy"
+  handle: "sammy"
+  imageUrl: "https://cdn.example.com/sam.png"
+  phoneNumber: "+14155552671"
+  googleVoicePhone: "+14155551212"
+  whatsAppPhone: "+14155559999"
+  instagramHandle: "sammyinsta"
+  telegramHandle: "sammytelegram"
+  signalPhone: "+14155551234"
+  profileVisibility: PUBLIC
+  contactVisibility: CONNECTIONS_ONLY
+}) { user {
+  displayName nickname handle imageUrl phoneNumber
+  googleVoicePhone whatsAppPhone instagramHandle telegramHandle signalPhone
+  profileVisibility contactVisibility
+} error } }
+```
+**Expect**: all fields returned as set (with `@` stripped from instagram/telegram). The "complete your profile" frontend flow makes this single call.
+
+### 21.9 Welcome email fires after first DisplayName
+
+If this is a brand-new email-signed-in user who hasn't received a welcome yet, setting `displayName` via `updateProfile` makes them eligible for the sweeper. On the next sweep pass (≤15 min, or restart the API for an immediate pass) logs show:
+```
+Welcome email sweep delivered 1/1 pending welcomes.
+```
+This verifies the deferred-welcome chain end-to-end.
+
+---
+
+## 22. Friends / blocks / flags
+
+The social-graph feature surfaces through `Friendships`, `UserBlocks`, `UserFlags` and these GraphQL mutations + queries. Test with two signed-in sessions side by side (Banana Cake Pop tab A as user A, tab B as user B).
+
+### Quick seed for the UI (if you just want populated lists)
+
+If you want every list (`friends`, `incomingFriendRequests`, `outgoingFriendRequests`, `blockedUsers`) populated without manually walking through 22.1–22.7, run the seed script:
+
+```bash
+./scripts/seed-social-graph.sh you@example.com
+```
+
+It creates 6 fake users with predictable handles (`friendalice`, `friendbob`, `pendingoutcarol`, `pendingindave`, `blockederin`, `flaggedfaith`) and wires the relationships against your email — one of each kind so every list has at least one row. Idempotent — re-running updates relationships in place. Wipe with `DELETE FROM "Users" WHERE "Email" LIKE '%-seed@buzzkeepr.test';`.
+
+Useful for frontend dev or for taking screenshots that aren't all empty-states. The sub-cases below still matter for actually verifying the mutations behave correctly — use the seed script as a starting state, then exercise individual flows on top.
+
+### 22.1 Send + accept
+
+```graphql
+# A → B
+mutation { sendFriendRequest(input: { targetUserId: "<B-id>" })
+  { friendship { id status } error } }
+# As B: see incoming
+query { incomingFriendRequests(first: 20) { edges { node { id handle nickname } } } }
+# As A: see outgoing
+query { outgoingFriendRequests(first: 20) { edges { node { id handle nickname } } } }
+# B accepts
+mutation { acceptFriendRequest(input: { otherUserId: "<A-id>" })
+  { friendship { status } error } }
+# Both sides: confirm in friends list
+query { friends(first: 20) { edges { node { id handle nickname } } } }
+```
+**Expect**: incoming/outgoing populate then empty after accept; both sides show each other in `friends`.
+
+### 22.2 Auto-accept when both send at once
+
+```graphql
+# A → B
+mutation { sendFriendRequest(input: { targetUserId: "<B-id>" }) { friendship { status } } }
+# B → A (mutual interest)
+mutation { sendFriendRequest(input: { targetUserId: "<A-id>" }) { friendship { status } } }
+```
+**Expect**: second call returns `status: ACCEPTED` immediately (no separate accept step). Both `friends` lists now include the other.
+
+### 22.3 Cancel / Decline
+
+```graphql
+# A → B
+mutation { sendFriendRequest(input: { targetUserId: "<B-id>" }) { friendship { id } } }
+# A cancels
+mutation { cancelFriendRequest(input: { otherUserId: "<B-id>" }) { success error } }
+# OR B declines
+mutation { declineFriendRequest(input: { otherUserId: "<A-id>" }) { success error } }
+```
+**Expect**: pending row disappears from both incoming and outgoing.
+
+### 22.4 Block — friendship removed, search hidden symmetrically
+
+```graphql
+# A is friends with B (from 22.1). A blocks B.
+mutation { blockUser(input: { targetUserId: "<B-id>" }) { success error } }
+# A's friends list
+query { friends(first: 20) { edges { node { id } } } }
+# A's blocked list
+query { blockedUsers(first: 20) { edges { node { id } } } }
+# Search visibility — A searches for B's handle
+query { searchUsers(query: "<b-handle>", first: 10) { edges { node { id } } } }
+# Reverse — B searches for A's handle
+query { searchUsers(query: "<a-handle>", first: 10) { edges { node { id } } } }
+```
+**Expect**: B is gone from A's friends list, present in A's blocked list. **Both** searches return empty — blocking is symmetric for discovery even though the relationship is asymmetric.
+
+### 22.5 Sending a request to a user who blocked you → generic error
+
+```graphql
+# As B (who is blocked by A): try to send a request to A
+mutation { sendFriendRequest(input: { targetUserId: "<A-id>" })
+  { friendship { id } error } }
+```
+**Expect**: `error: "Unable to send friend request."`, `friendship: null`. **Don't leak** — this is the same copy as "target not found", deliberately.
+
+### 22.6 Block-leak protection on caller side
+
+```graphql
+# As A: try to friend someone you've blocked
+mutation { sendFriendRequest(input: { targetUserId: "<B-id>" })
+  { friendship { id } error } }
+```
+**Expect**: `error: "Unblock this user before sending a friend request."` — actionable, because A *knows* they blocked B.
+
+### 22.7 Flag — atomic unfriend + block + flag
+
+```graphql
+# Re-friend A↔B for setup, then A flags B
+mutation { flagUser(input: { targetUserId: "<B-id>" }) { success error } }
+# Verify state
+query { friends(first: 20) { edges { node { id } } } }
+query { blockedUsers(first: 20) { edges { node { id } } } }
+```
+**Expect**: friendship gone, B in A's blocked list. DB:
+```sql
+SELECT 1 FROM "UserFlags" f
+JOIN "Users" u ON u."Id" = f."FlaggerId"
+WHERE u."Email" = 'a@example.com' AND f."FlaggedUserId" = '<B-id>';
+```
+→ row exists. Re-flagging is idempotent — calling `flagUser` again succeeds without creating a second row.
+
+### 22.8 `viewerFriendshipState` on search results
+
+```graphql
+# As A: search for users you have varying relationships with
+query { searchUsers(query: "<query>", first: 20) {
+  edges { node { id handle viewerFriendshipState } }
+} }
+```
+**Expect**: each row's `viewerFriendshipState` is one of `NONE`, `REQUEST_SENT`, `REQUEST_RECEIVED`, `FRIENDS`. Drives the frontend's Add / Pending / Accept / Friends button without a second query.
+
+---
+
 ## 19. Reset between full runs
 
 Wipe all DB state and start fresh:
@@ -1012,27 +1438,39 @@ docker compose up -d
 dotnet ef database update --project BuzzKeepr.Infrastructure --startup-project BuzzKeepr.Presentation --context BuzzKeeprDbContext
 ```
 
-Or just truncate users (cascades to sessions, external_accounts, verification_tokens):
+Or just truncate users (cascades to sessions, external_accounts, verification_tokens, the four sub-aggregate tables, friendships, blocks, flags, and promo redemptions — every FK to `Users` is `ON DELETE CASCADE` or `RESTRICT`-cleared by the cascade chain):
 ```sql
 TRUNCATE "Users" CASCADE;
+```
+
+Targeted reset for a single email — drops their sub-aggregates without affecting other users:
+```sql
+WITH target AS (SELECT "Id" FROM "Users" WHERE "Email" = 'you@example.com')
+DELETE FROM "UserProfiles" WHERE "UserId" IN (SELECT "Id" FROM target);
+WITH target AS (SELECT "Id" FROM "Users" WHERE "Email" = 'you@example.com')
+DELETE FROM "UserIdentityVerifications" WHERE "UserId" IN (SELECT "Id" FROM target);
+WITH target AS (SELECT "Id" FROM "Users" WHERE "Email" = 'you@example.com')
+DELETE FROM "UserBackgroundChecks" WHERE "UserId" IN (SELECT "Id" FROM target);
+WITH target AS (SELECT "Id" FROM "Users" WHERE "Email" = 'you@example.com')
+DELETE FROM "UserSubscriptions" WHERE "UserId" IN (SELECT "Id" FROM target);
 ```
 
 ---
 ## 20. Coverage map
 
-Once you've worked through phases 4–18, the following are end-to-end-verified against a real running stack:
+Once you've worked through phases 4–22, the following are end-to-end-verified against a real running stack:
 
 | Feature | Phase(s) |
 | --- | --- |
 | Email sign-in (request + verify) | 4 |
-| Welcome email (inline + sweeper) | 4, 17 |
+| Welcome email (deferred + sweeper) | 4, 17 |
 | Bearer auth | 4, 5 |
 | Cookie auth + sliding TTL | 4, 7 |
 | CSRF middleware | 8 |
-| `createUser` app-key gate | 9 |
+| `createUser` email-only signup + app-key gate | 9 |
 | Sign-out + session revocation | 10 |
-| Google sign-in + image capture | 11 |
-| `currentUser` | 5, throughout |
+| Google sign-in (no provider-fetched DisplayName/ImageUrl) | 11 |
+| `currentUser` (flat shape over sub-aggregates) | 5, throughout |
 | `userById` row-level security | 5 |
 | `acceptTerms` | 5 |
 | Failed-attempts lockout | 6 |
@@ -1043,6 +1481,21 @@ Once you've worked through phases 4–18, the following are end-to-end-verified 
 | Checkr instant check + phone capture | 14 |
 | Checkr profile reuse | 15 |
 | Checkr requires Persona-verified identity | 16 |
+| Checkr renewal sweeper (no subscription gate) | 16.7 |
+| Background-check Denied path | 16.5 |
+| RevenueCat webhook handling | 16.6 |
+| Schema split (`Users` lean, sub-aggregates lazy) | 5, 14, 16.6, 16.7, 16.8 |
+| `updateProfile` — Nickname, Handle, all contact fields | 21.2–21.5, 21.8 |
+| `updateProfile` — image URL | 21.5 |
+| `ProfileVisibility=Private` excludes from search | 21.6 |
+| `ContactVisibility` enforcement (ConnectionsOnly + friend = visible; otherwise null) | 21.7 |
+| Deferred welcome chain (signup → updateProfile → sweeper) | 17, 21.9 |
+| Friend requests — send / accept / decline / cancel | 22.1, 22.3 |
+| Mutual-interest auto-accept | 22.2 |
+| Block — symmetric search hiding + friendship removal | 22.4 |
+| Block-leak protection (generic-error for blocked-by-target) | 22.5–22.6 |
+| Flag — atomic unfriend + block + flag + idempotent | 22.7 |
+| `viewerFriendshipState` annotation on search | 22.8 |
 | Session cleanup background service | 18 |
 
 If any one of these doesn't behave as the doc says, stop and dig in — the corresponding integration test should also fail, so cross-check there.

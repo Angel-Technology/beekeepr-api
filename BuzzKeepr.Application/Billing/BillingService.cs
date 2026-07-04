@@ -42,8 +42,8 @@ public sealed class BillingService(
             return;
         }
 
-        if (user.SubscriptionUpdatedAtUtc.HasValue
-            && evt.EventTimestampUtc <= user.SubscriptionUpdatedAtUtc.Value)
+        var existingUpdatedAt = user.Subscription?.UpdatedAtUtc;
+        if (existingUpdatedAt.HasValue && evt.EventTimestampUtc <= existingUpdatedAt.Value)
         {
             // Watermark: drop replays + out-of-order events, mirroring the Persona webhook pattern.
             logger.LogInformation(
@@ -51,7 +51,7 @@ public sealed class BillingService(
                 evt.Id,
                 evt.Type,
                 evt.EventTimestampUtc,
-                user.SubscriptionUpdatedAtUtc.Value);
+                existingUpdatedAt.Value);
             return;
         }
 
@@ -63,8 +63,8 @@ public sealed class BillingService(
             evt.Id,
             evt.Type,
             user.Id,
-            user.SubscriptionStatus,
-            user.SubscriptionCurrentPeriodEndUtc);
+            user.Subscription?.Status,
+            user.Subscription?.CurrentPeriodEndUtc);
     }
 
     public async Task<SubscriptionDto> GetSubscriptionForUserAsync(Guid userId, CancellationToken cancellationToken)
@@ -79,10 +79,11 @@ public sealed class BillingService(
 
         // Local mirror says not active. Try a live read in case the user just purchased and the
         // webhook hasn't landed yet. If RevenueCat agrees, persist the fresh snapshot.
-        if (string.IsNullOrWhiteSpace(user.RevenueCatAppUserId))
+        var revenueCatAppUserId = user.Subscription?.RevenueCatAppUserId;
+        if (string.IsNullOrWhiteSpace(revenueCatAppUserId))
             return SubscriptionDto.FromUser(user);
 
-        var snapshot = await revenueCatClient.GetSubscriberAsync(user.RevenueCatAppUserId, cancellationToken);
+        var snapshot = await revenueCatClient.GetSubscriberAsync(revenueCatAppUserId, cancellationToken);
 
         if (snapshot is not null)
         {
@@ -105,59 +106,60 @@ public sealed class BillingService(
         var user = await billingRepository.GetByIdAsync(userId, cancellationToken);
 
         if (user is not null)
-            user.RevenueCatAppUserId = appUserId;
+            user.EnsureSubscription().RevenueCatAppUserId = appUserId;
 
         return user;
     }
 
     private static void ApplyEventToUser(User user, RevenueCatEvent evt)
     {
-        user.SubscriptionUpdatedAtUtc = evt.EventTimestampUtc;
-        user.RevenueCatAppUserId ??= evt.AppUserId;
+        var sub = user.EnsureSubscription();
+        sub.UpdatedAtUtc = evt.EventTimestampUtc;
+        sub.RevenueCatAppUserId ??= evt.AppUserId;
 
         if (!string.IsNullOrWhiteSpace(evt.ProductId))
-            user.SubscriptionProductId = evt.ProductId;
+            sub.ProductId = evt.ProductId;
 
         if (!string.IsNullOrWhiteSpace(evt.EntitlementId))
-            user.SubscriptionEntitlement = evt.EntitlementId;
+            sub.Entitlement = evt.EntitlementId;
 
         if (evt.Store is not null)
-            user.SubscriptionStore = evt.Store;
+            sub.Store = evt.Store;
 
         switch (evt.Type)
         {
             case "INITIAL_PURCHASE":
-                user.SubscriptionStatus = evt.IsTrialPeriod
+                sub.Status = evt.IsTrialPeriod
                     ? SubscriptionStatus.Trialing
                     : SubscriptionStatus.Active;
-                user.SubscriptionCurrentPeriodEndUtc = evt.ExpirationUtc ?? user.SubscriptionCurrentPeriodEndUtc;
-                user.SubscriptionWillRenew = true;
+                sub.CurrentPeriodEndUtc = evt.ExpirationUtc ?? sub.CurrentPeriodEndUtc;
+                sub.WillRenew = true;
                 break;
 
             case "RENEWAL":
             case "PRODUCT_CHANGE":
             case "UNCANCELLATION":
-                user.SubscriptionStatus = SubscriptionStatus.Active;
-                user.SubscriptionCurrentPeriodEndUtc = evt.ExpirationUtc ?? user.SubscriptionCurrentPeriodEndUtc;
-                user.SubscriptionWillRenew = true;
+                sub.Status = SubscriptionStatus.Active;
+                sub.CurrentPeriodEndUtc = evt.ExpirationUtc ?? sub.CurrentPeriodEndUtc;
+                sub.WillRenew = true;
                 break;
 
             case "CANCELLATION":
                 // User cancelled but the period is still paid through. Frontend should still show
                 // "premium" until period_end, but mark it as cancelled so we can surface "renew".
-                user.SubscriptionStatus = SubscriptionStatus.Cancelled;
-                user.SubscriptionCurrentPeriodEndUtc = evt.ExpirationUtc ?? user.SubscriptionCurrentPeriodEndUtc;
-                user.SubscriptionWillRenew = false;
+                sub.Status = SubscriptionStatus.Cancelled;
+                sub.CurrentPeriodEndUtc = evt.ExpirationUtc ?? sub.CurrentPeriodEndUtc;
+                sub.WillRenew = false;
                 break;
 
             case "BILLING_ISSUE":
-                user.SubscriptionStatus = SubscriptionStatus.InGracePeriod;
-                user.SubscriptionCurrentPeriodEndUtc = evt.ExpirationUtc ?? user.SubscriptionCurrentPeriodEndUtc;
+                sub.Status = SubscriptionStatus.InGracePeriod;
+                sub.CurrentPeriodEndUtc = evt.ExpirationUtc ?? sub.CurrentPeriodEndUtc;
                 break;
 
             case "EXPIRATION":
-                user.SubscriptionStatus = SubscriptionStatus.Expired;
-                user.SubscriptionWillRenew = false;
+                sub.Status = SubscriptionStatus.Expired;
+                sub.WillRenew = false;
                 break;
 
             case "NON_RENEWING_PURCHASE":
@@ -176,15 +178,15 @@ public sealed class BillingService(
                     // active, and only extend the period_end forward — never shorten.
                     if (!Models.SubscriptionDto.IsLocallyActive(user))
                     {
-                        user.SubscriptionStatus = SubscriptionStatus.Active;
-                        user.SubscriptionWillRenew = false;
+                        sub.Status = SubscriptionStatus.Active;
+                        sub.WillRenew = false;
                     }
 
                     if (evt.ExpirationUtc is { } promoExpiry
-                        && (user.SubscriptionCurrentPeriodEndUtc is null
-                            || promoExpiry > user.SubscriptionCurrentPeriodEndUtc.Value))
+                        && (sub.CurrentPeriodEndUtc is null
+                            || promoExpiry > sub.CurrentPeriodEndUtc.Value))
                     {
-                        user.SubscriptionCurrentPeriodEndUtc = promoExpiry;
+                        sub.CurrentPeriodEndUtc = promoExpiry;
                     }
                 }
                 break;
@@ -192,7 +194,7 @@ public sealed class BillingService(
             case "TRANSFER":
             case "SUBSCRIBER_ALIAS":
                 // Identity events. Make sure we have the latest app_user_id stamped.
-                user.RevenueCatAppUserId = evt.AppUserId;
+                sub.RevenueCatAppUserId = evt.AppUserId;
                 break;
 
             case "TEST":
@@ -207,14 +209,15 @@ public sealed class BillingService(
 
     private static void ApplySnapshotToUser(User user, RevenueCatSubscriberSnapshot snapshot)
     {
-        user.SubscriptionStatus = snapshot.Status;
-        user.SubscriptionEntitlement = snapshot.Entitlement ?? user.SubscriptionEntitlement;
-        user.SubscriptionProductId = snapshot.ProductId ?? user.SubscriptionProductId;
-        user.SubscriptionStore = snapshot.Store ?? user.SubscriptionStore;
-        user.SubscriptionCurrentPeriodEndUtc = snapshot.CurrentPeriodEndUtc ?? user.SubscriptionCurrentPeriodEndUtc;
-        user.SubscriptionWillRenew = snapshot.WillRenew ?? user.SubscriptionWillRenew;
-        user.SubscriptionUpdatedAtUtc = DateTime.UtcNow;
-        user.RevenueCatAppUserId ??= snapshot.AppUserId;
+        var sub = user.EnsureSubscription();
+        sub.Status = snapshot.Status;
+        sub.Entitlement = snapshot.Entitlement ?? sub.Entitlement;
+        sub.ProductId = snapshot.ProductId ?? sub.ProductId;
+        sub.Store = snapshot.Store ?? sub.Store;
+        sub.CurrentPeriodEndUtc = snapshot.CurrentPeriodEndUtc ?? sub.CurrentPeriodEndUtc;
+        sub.WillRenew = snapshot.WillRenew ?? sub.WillRenew;
+        sub.UpdatedAtUtc = DateTime.UtcNow;
+        sub.RevenueCatAppUserId ??= snapshot.AppUserId;
     }
 
     private static bool TryExtractEvent(JsonElement root, out RevenueCatEvent evt)

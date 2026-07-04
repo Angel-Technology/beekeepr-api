@@ -1,76 +1,26 @@
-using BuzzKeepr.Domain.Enums;
-
 namespace BuzzKeepr.Domain.Entities;
 
+// Core identity row. Holds only what auth and lifecycle actually need:
+// - Email + verification flag (the credential)
+// - Terms acceptance (legal gate)
+// - Welcome-email tracking (sweeper bookkeeping)
+// - Created / soft-delete timestamps
+//
+// Everything user-facing, provider-derived, billing, or compliance-related lives on a 1:1
+// sub-aggregate (UserProfile / UserIdentityVerification / UserBackgroundCheck / UserSubscription)
+// so this row stays small and the App Store-sensitive "fetched vs user-supplied" boundary
+// is structural, not a documentation comment.
 public sealed class User
 {
     public Guid Id { get; set; }
 
     public string Email { get; set; } = string.Empty;
 
-    public string? DisplayName { get; set; }
-
-    public string? Nickname { get; set; }
-
-    public string? Handle { get; set; }
-
-    public string? ImageUrl { get; set; }
-
     public bool EmailVerified { get; set; }
-
-    public IdentityVerificationStatus IdentityVerificationStatus { get; set; } = IdentityVerificationStatus.NotStarted;
-
-    public string? PersonaInquiryId { get; set; }
-
-    public PersonaInquiryStatus? PersonaInquiryStatus { get; set; }
-
-    public DateTime? PersonaInquiryUpdatedAtUtc { get; set; }
-
-    public string? VerifiedFirstName { get; set; }
-
-    public string? VerifiedMiddleName { get; set; }
-
-    public string? VerifiedLastName { get; set; }
-
-    public string? VerifiedBirthdate { get; set; }
-
-    public string? VerifiedLicenseState { get; set; }
-
-    public string? PhoneNumber { get; set; }
-
-    public DateTime? PersonaVerifiedAtUtc { get; set; }
-
-    public string? CheckrProfileId { get; set; }
-
-    public string? CheckrLastCheckId { get; set; }
-
-    public DateTime? CheckrLastCheckAtUtc { get; set; }
-
-    public bool? CheckrLastCheckHasPossibleMatches { get; set; }
-
-    public BackgroundCheckBadge BackgroundCheckBadge { get; set; } = BackgroundCheckBadge.None;
-
-    public DateTime? BackgroundCheckBadgeExpiresAtUtc { get; set; }
 
     public DateTime? TermsAcceptedAtUtc { get; set; }
 
     public DateTime? WelcomeEmailSentAtUtc { get; set; }
-
-    public SubscriptionStatus SubscriptionStatus { get; set; } = SubscriptionStatus.None;
-
-    public string? SubscriptionEntitlement { get; set; }
-
-    public string? SubscriptionProductId { get; set; }
-
-    public SubscriptionStore? SubscriptionStore { get; set; }
-
-    public DateTime? SubscriptionCurrentPeriodEndUtc { get; set; }
-
-    public bool? SubscriptionWillRenew { get; set; }
-
-    public DateTime? SubscriptionUpdatedAtUtc { get; set; }
-
-    public string? RevenueCatAppUserId { get; set; }
 
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 
@@ -81,4 +31,12 @@ public sealed class User
     public ICollection<Session> Sessions { get; set; } = new List<Session>();
 
     public ICollection<VerificationToken> VerificationTokens { get; set; } = new List<VerificationToken>();
+
+    public UserProfile? Profile { get; set; }
+
+    public UserIdentityVerification? IdentityVerification { get; set; }
+
+    public UserBackgroundCheck? BackgroundCheck { get; set; }
+
+    public UserSubscription? Subscription { get; set; }
 }

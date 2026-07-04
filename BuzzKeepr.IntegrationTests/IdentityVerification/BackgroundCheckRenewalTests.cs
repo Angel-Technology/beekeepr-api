@@ -50,11 +50,11 @@ public sealed class BackgroundCheckRenewalTests(PostgresFixture postgres) : IAsy
         Assert.Equal("prf_seeded", call.ProfileId); // profile-reuse path
 
         var stored = await ReloadAsync(user.Id);
-        Assert.Equal(BackgroundCheckBadge.Approved, stored.BackgroundCheckBadge);
-        Assert.NotNull(stored.BackgroundCheckBadgeExpiresAtUtc);
-        Assert.True(stored.BackgroundCheckBadgeExpiresAtUtc > DateTime.UtcNow.AddMonths(2),
+        Assert.Equal(BackgroundCheckBadge.Approved, stored.BackgroundCheck!.Badge);
+        Assert.NotNull(stored.BackgroundCheck!.BadgeExpiresAtUtc);
+        Assert.True(stored.BackgroundCheck!.BadgeExpiresAtUtc > DateTime.UtcNow.AddMonths(2),
             "badge should have a fresh ~3-month expiry");
-        Assert.Equal("chk_renewed", stored.CheckrLastCheckId);
+        Assert.Equal("chk_renewed", stored.BackgroundCheck!.CheckrLastCheckId);
     }
 
     [Fact]
@@ -76,8 +76,8 @@ public sealed class BackgroundCheckRenewalTests(PostgresFixture postgres) : IAsy
         await SweepOnceAsync();
 
         var stored = await ReloadAsync(user.Id);
-        Assert.Equal(BackgroundCheckBadge.Denied, stored.BackgroundCheckBadge);
-        Assert.Equal(true, stored.CheckrLastCheckHasPossibleMatches);
+        Assert.Equal(BackgroundCheckBadge.Denied, stored.BackgroundCheck!.Badge);
+        Assert.Equal(true, stored.BackgroundCheck.CheckrLastCheckHasPossibleMatches);
     }
 
     [Fact]
@@ -111,8 +111,8 @@ public sealed class BackgroundCheckRenewalTests(PostgresFixture postgres) : IAsy
         Assert.Equal(2, factory.FakeCheckrTrust.Calls.Count);
         var noSubStored = await ReloadAsync(noSub.Id);
         var expiredStored = await ReloadAsync(expiredSub.Id);
-        Assert.True(noSubStored.BackgroundCheckBadgeExpiresAtUtc > DateTime.UtcNow.AddMonths(2));
-        Assert.True(expiredStored.BackgroundCheckBadgeExpiresAtUtc > DateTime.UtcNow.AddMonths(2));
+        Assert.True(noSubStored.BackgroundCheck!.BadgeExpiresAtUtc > DateTime.UtcNow.AddMonths(2));
+        Assert.True(expiredStored.BackgroundCheck!.BadgeExpiresAtUtc > DateTime.UtcNow.AddMonths(2));
     }
 
     [Fact]
@@ -158,17 +158,21 @@ public sealed class BackgroundCheckRenewalTests(PostgresFixture postgres) : IAsy
             Id = Guid.NewGuid(),
             Email = email,
             EmailVerified = true,
-            CreatedAtUtc = DateTime.UtcNow.AddMonths(-3),
-            VerifiedFirstName = "Renew",
-            VerifiedLastName = "Tester",
-            CheckrProfileId = profileId,
-            CheckrLastCheckId = $"chk_seeded_{Guid.NewGuid():N}",
-            CheckrLastCheckAtUtc = DateTime.UtcNow.AddMonths(-3),
-            CheckrLastCheckHasPossibleMatches = false,
-            BackgroundCheckBadge = badge,
-            BackgroundCheckBadgeExpiresAtUtc = badgeExpiry,
-            SubscriptionStatus = subscriptionStatus
+            CreatedAtUtc = DateTime.UtcNow.AddMonths(-3)
         };
+        user.EnsureIdentityVerification().VerifiedFirstName = "Renew";
+        user.IdentityVerification!.VerifiedLastName = "Tester";
+
+        var bc = user.EnsureBackgroundCheck();
+        bc.CheckrProfileId = profileId;
+        bc.CheckrLastCheckId = $"chk_seeded_{Guid.NewGuid():N}";
+        bc.CheckrLastCheckAtUtc = DateTime.UtcNow.AddMonths(-3);
+        bc.CheckrLastCheckHasPossibleMatches = false;
+        bc.Badge = badge;
+        bc.BadgeExpiresAtUtc = badgeExpiry;
+
+        if (subscriptionStatus != SubscriptionStatus.None)
+            user.EnsureSubscription().Status = subscriptionStatus;
 
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
@@ -181,6 +185,11 @@ public sealed class BackgroundCheckRenewalTests(PostgresFixture postgres) : IAsy
     {
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
-        return await dbContext.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
+        return await dbContext.Users.AsNoTracking()
+            .Include(u => u.Profile)
+            .Include(u => u.IdentityVerification)
+            .Include(u => u.BackgroundCheck)
+            .Include(u => u.Subscription)
+            .FirstAsync(u => u.Id == userId);
     }
 }

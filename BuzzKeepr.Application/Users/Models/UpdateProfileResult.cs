@@ -12,5 +12,11 @@ public sealed class UpdateProfileResult
 
     public bool HandleAlreadyTaken { get; init; }
 
+    public bool DisplayNameTooLong { get; init; }
+
+    public bool ContactFieldTooLong { get; init; }
+
+    public bool ImageUrlTooLong { get; init; }
+
     public UserDto? User { get; init; }
 }

@@ -45,6 +45,10 @@ public static class DependencyInjection
             configuration.GetSection(CheckrTrustOptions.SectionName));
         services.Configure<RevenueCatOptions>(
             configuration.GetSection(RevenueCatOptions.SectionName));
+        services.Configure<ApnsOptions>(
+            configuration.GetSection(ApnsOptions.SectionName));
+        services.Configure<FcmOptions>(
+            configuration.GetSection(FcmOptions.SectionName));
 
         var emailOptions = configuration
             .GetSection(EmailDeliveryOptions.SectionName)
@@ -117,6 +121,28 @@ public static class DependencyInjection
         services.AddScoped<Application.Billing.IBillingRepository, BillingRepository>();
         services.AddScoped<Application.Billing.IPromoCodeRepository, PromoCodeRepository>();
         services.AddScoped<Application.Billing.IRevenueCatClient, RevenueCatClient>();
+        services.AddScoped<Application.Connections.IConnectionsRepository, ConnectionsRepository>();
+        services.AddScoped<Application.Notifications.IPushTokenRepository, PushTokenRepository>();
+        services.AddScoped<Application.Notifications.INotificationProfileLookup, NotificationProfileLookup>();
+        services.AddHttpClient<Application.Notifications.IApnsPushClient, Notifications.ApnsPushClient>((serviceProvider, httpClient) =>
+        {
+            // Production vs sandbox switch — issued device tokens only work against one of them.
+            // Dev/TestFlight builds need sandbox; App Store builds need production. Mixing
+            // gets BadDeviceToken / Unregistered receipts.
+            var apnsOptions = serviceProvider
+                .GetRequiredService<Microsoft.Extensions.Options.IOptions<ApnsOptions>>()
+                .Value;
+
+            httpClient.BaseAddress = new Uri(apnsOptions.UseSandbox
+                ? "https://api.sandbox.push.apple.com"
+                : "https://api.push.apple.com");
+            httpClient.Timeout = TimeSpan.FromSeconds(10);
+            httpClient.DefaultRequestVersion = System.Net.HttpVersion.Version20;
+            httpClient.DefaultVersionPolicy = System.Net.Http.HttpVersionPolicy.RequestVersionExact;
+        });
+        // FCM client is a singleton — FirebaseApp is process-wide and initialization parses the
+        // service-account JSON. Scoped lifetime would recreate the SDK on every request.
+        services.AddSingleton<Application.Notifications.IFcmPushClient, Notifications.FcmPushClient>();
         services.AddScoped<PersonaWebhookSignatureVerifier>();
         services.AddScoped<RevenueCatWebhookAuthorizer>();
         services.AddHostedService<Auth.SessionCleanupBackgroundService>();

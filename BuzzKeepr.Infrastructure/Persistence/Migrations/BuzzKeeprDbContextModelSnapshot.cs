@@ -61,6 +61,43 @@ namespace BuzzKeepr.Infrastructure.Persistence.Migrations
                     b.ToTable("ExternalAccounts");
                 });
 
+            modelBuilder.Entity("BuzzKeepr.Domain.Entities.Friendship", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AddresseeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("RequesterId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("RespondedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasDefaultValue("Pending");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AddresseeId", "Status");
+
+                    b.HasIndex("RequesterId", "AddresseeId")
+                        .IsUnique();
+
+                    b.HasIndex("RequesterId", "Status");
+
+                    b.ToTable("Friendships");
+                });
+
             modelBuilder.Entity("BuzzKeepr.Domain.Entities.PromoCode", b =>
                 {
                     b.Property<Guid>("Id")
@@ -184,14 +221,49 @@ namespace BuzzKeepr.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<string>("BackgroundCheckBadge")
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
+                    b.Property<bool>("EmailVerified")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("TermsAcceptedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("WelcomeEmailSentAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Email")
+                        .IsUnique();
+
+                    b.ToTable("Users");
+                });
+
+            modelBuilder.Entity("BuzzKeepr.Domain.Entities.UserBackgroundCheck", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<string>("Badge")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)")
                         .HasDefaultValue("None");
 
-                    b.Property<DateTime?>("BackgroundCheckBadgeExpiresAtUtc")
+                    b.Property<DateTime?>("BadgeExpiresAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime?>("CheckrLastCheckAtUtc")
@@ -208,42 +280,76 @@ namespace BuzzKeepr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CheckrProfileId")
+                        .IsUnique();
+
+                    b.HasIndex("UserId")
+                        .IsUnique();
+
+                    b.ToTable("UserBackgroundChecks");
+                });
+
+            modelBuilder.Entity("BuzzKeepr.Domain.Entities.UserBlock", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BlockedId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BlockerId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<DateTime?>("DeletedAtUtc")
+                    b.HasKey("Id");
+
+                    b.HasIndex("BlockedId");
+
+                    b.HasIndex("BlockerId", "BlockedId")
+                        .IsUnique();
+
+                    b.ToTable("UserBlocks");
+                });
+
+            modelBuilder.Entity("BuzzKeepr.Domain.Entities.UserFlag", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<string>("DisplayName")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
+                    b.Property<Guid>("FlaggedUserId")
+                        .HasColumnType("uuid");
 
-                    b.Property<string>("Email")
-                        .IsRequired()
-                        .HasMaxLength(320)
-                        .HasColumnType("character varying(320)");
+                    b.Property<Guid>("FlaggerId")
+                        .HasColumnType("uuid");
 
-                    b.Property<bool>("EmailVerified")
-                        .HasColumnType("boolean");
+                    b.HasKey("Id");
 
-                    b.Property<string>("Handle")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
+                    b.HasIndex("FlaggedUserId");
 
-                    b.Property<string>("IdentityVerificationStatus")
-                        .IsRequired()
+                    b.HasIndex("FlaggerId", "FlaggedUserId")
+                        .IsUnique();
+
+                    b.ToTable("UserFlags");
+                });
+
+            modelBuilder.Entity("BuzzKeepr.Domain.Entities.UserIdentityVerification", b =>
+                {
+                    b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)")
-                        .HasDefaultValue("NotStarted");
-
-                    b.Property<string>("ImageUrl")
-                        .HasMaxLength(2048)
-                        .HasColumnType("character varying(2048)");
-
-                    b.Property<string>("Nickname")
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
 
                     b.Property<string>("PersonaInquiryId")
                         .HasMaxLength(100)
@@ -259,44 +365,15 @@ namespace BuzzKeepr.Infrastructure.Persistence.Migrations
                     b.Property<DateTime?>("PersonaVerifiedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<string>("PhoneNumber")
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.Property<string>("RevenueCatAppUserId")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<DateTime?>("SubscriptionCurrentPeriodEndUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("SubscriptionEntitlement")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("SubscriptionProductId")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<string>("SubscriptionStatus")
+                    b.Property<string>("Status")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)")
-                        .HasDefaultValue("None");
+                        .HasDefaultValue("NotStarted");
 
-                    b.Property<string>("SubscriptionStore")
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<DateTime?>("SubscriptionUpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool?>("SubscriptionWillRenew")
-                        .HasColumnType("boolean");
-
-                    b.Property<DateTime?>("TermsAcceptedAtUtc")
-                        .HasColumnType("timestamp with time zone");
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
 
                     b.Property<string>("VerifiedBirthdate")
                         .HasMaxLength(20)
@@ -318,27 +395,189 @@ namespace BuzzKeepr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
-                    b.Property<DateTime?>("WelcomeEmailSentAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
                     b.HasKey("Id");
-
-                    b.HasIndex("CheckrProfileId")
-                        .IsUnique();
-
-                    b.HasIndex("Email")
-                        .IsUnique();
-
-                    b.HasIndex("Handle")
-                        .IsUnique();
 
                     b.HasIndex("PersonaInquiryId")
                         .IsUnique();
 
+                    b.HasIndex("UserId")
+                        .IsUnique();
+
+                    b.ToTable("UserIdentityVerifications");
+                });
+
+            modelBuilder.Entity("BuzzKeepr.Domain.Entities.UserProfile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<string>("ContactVisibility")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasDefaultValue("Private");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DisplayName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("GoogleVoicePhone")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Handle")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("ImageUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<string>("InstagramHandle")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Nickname")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("PhoneNumber")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("ProfileVisibility")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasDefaultValue("Public");
+
+                    b.Property<string>("SignalPhone")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("SnapchatHandle")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("TelegramHandle")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("WhatsAppPhone")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Handle")
+                        .IsUnique();
+
+                    b.HasIndex("UserId")
+                        .IsUnique();
+
+                    b.ToTable("UserProfiles");
+                });
+
+            modelBuilder.Entity("BuzzKeepr.Domain.Entities.UserPushToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("LastSeenAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Platform")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Token")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Token")
+                        .IsUnique();
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("UserPushTokens");
+                });
+
+            modelBuilder.Entity("BuzzKeepr.Domain.Entities.UserSubscription", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTime?>("CurrentPeriodEndUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Entitlement")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("ProductId")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("RevenueCatAppUserId")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasDefaultValue("None");
+
+                    b.Property<string>("Store")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool?>("WillRenew")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("Id");
+
                     b.HasIndex("RevenueCatAppUserId")
                         .IsUnique();
 
-                    b.ToTable("Users");
+                    b.HasIndex("UserId")
+                        .IsUnique();
+
+                    b.ToTable("UserSubscriptions");
                 });
 
             modelBuilder.Entity("BuzzKeepr.Domain.Entities.VerificationToken", b =>
@@ -403,6 +642,25 @@ namespace BuzzKeepr.Infrastructure.Persistence.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("BuzzKeepr.Domain.Entities.Friendship", b =>
+                {
+                    b.HasOne("BuzzKeepr.Domain.Entities.User", "Addressee")
+                        .WithMany()
+                        .HasForeignKey("AddresseeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BuzzKeepr.Domain.Entities.User", "Requester")
+                        .WithMany()
+                        .HasForeignKey("RequesterId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Addressee");
+
+                    b.Navigation("Requester");
+                });
+
             modelBuilder.Entity("BuzzKeepr.Domain.Entities.PromoRedemption", b =>
                 {
                     b.HasOne("BuzzKeepr.Domain.Entities.PromoCode", "PromoCode")
@@ -433,6 +691,99 @@ namespace BuzzKeepr.Infrastructure.Persistence.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("BuzzKeepr.Domain.Entities.UserBackgroundCheck", b =>
+                {
+                    b.HasOne("BuzzKeepr.Domain.Entities.User", "User")
+                        .WithOne("BackgroundCheck")
+                        .HasForeignKey("BuzzKeepr.Domain.Entities.UserBackgroundCheck", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("BuzzKeepr.Domain.Entities.UserBlock", b =>
+                {
+                    b.HasOne("BuzzKeepr.Domain.Entities.User", "Blocked")
+                        .WithMany()
+                        .HasForeignKey("BlockedId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BuzzKeepr.Domain.Entities.User", "Blocker")
+                        .WithMany()
+                        .HasForeignKey("BlockerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Blocked");
+
+                    b.Navigation("Blocker");
+                });
+
+            modelBuilder.Entity("BuzzKeepr.Domain.Entities.UserFlag", b =>
+                {
+                    b.HasOne("BuzzKeepr.Domain.Entities.User", "FlaggedUser")
+                        .WithMany()
+                        .HasForeignKey("FlaggedUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BuzzKeepr.Domain.Entities.User", "Flagger")
+                        .WithMany()
+                        .HasForeignKey("FlaggerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("FlaggedUser");
+
+                    b.Navigation("Flagger");
+                });
+
+            modelBuilder.Entity("BuzzKeepr.Domain.Entities.UserIdentityVerification", b =>
+                {
+                    b.HasOne("BuzzKeepr.Domain.Entities.User", "User")
+                        .WithOne("IdentityVerification")
+                        .HasForeignKey("BuzzKeepr.Domain.Entities.UserIdentityVerification", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("BuzzKeepr.Domain.Entities.UserProfile", b =>
+                {
+                    b.HasOne("BuzzKeepr.Domain.Entities.User", "User")
+                        .WithOne("Profile")
+                        .HasForeignKey("BuzzKeepr.Domain.Entities.UserProfile", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("BuzzKeepr.Domain.Entities.UserPushToken", b =>
+                {
+                    b.HasOne("BuzzKeepr.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("BuzzKeepr.Domain.Entities.UserSubscription", b =>
+                {
+                    b.HasOne("BuzzKeepr.Domain.Entities.User", "User")
+                        .WithOne("Subscription")
+                        .HasForeignKey("BuzzKeepr.Domain.Entities.UserSubscription", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("BuzzKeepr.Domain.Entities.VerificationToken", b =>
                 {
                     b.HasOne("BuzzKeepr.Domain.Entities.User", "User")
@@ -450,9 +801,17 @@ namespace BuzzKeepr.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("BuzzKeepr.Domain.Entities.User", b =>
                 {
+                    b.Navigation("BackgroundCheck");
+
                     b.Navigation("ExternalAccounts");
 
+                    b.Navigation("IdentityVerification");
+
+                    b.Navigation("Profile");
+
                     b.Navigation("Sessions");
+
+                    b.Navigation("Subscription");
 
                     b.Navigation("VerificationTokens");
                 });
