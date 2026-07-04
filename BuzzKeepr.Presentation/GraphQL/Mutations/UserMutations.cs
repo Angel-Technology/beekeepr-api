@@ -521,7 +521,8 @@ public sealed class UserMutations
             currentUser.User.Id,
             new Application.IdentityVerification.Models.StartInstantCriminalCheckInput
             {
-                PhoneNumber = input.PhoneNumber
+                PhoneNumber = input.PhoneNumber,
+                LicenseState = input.LicenseState
             },
             cancellationToken);
 

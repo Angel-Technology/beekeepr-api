@@ -56,6 +56,12 @@ services:
       - { key: Apns__TeamId,                  sync: false }
       - { key: Apns__BundleId,                sync: false }
       - { key: Apns__UseSandbox,              sync: false }
+      # FCM (Android push notifications) — Fcm__ServiceAccountJsonContents is the full
+      # Firebase service-account JSON (from Firebase Console → Project Settings →
+      # Service Accounts → Generate new private key). Fcm__ProjectId is the Firebase
+      # project id (buzzkeepr).
+      - { key: Fcm__ServiceAccountJsonContents, sync: false }
+      - { key: Fcm__ProjectId,                  sync: false }
       - { key: Sentry__Dsn,                   sync: false }
       - { key: Sentry__Environment,           sync: false }
       - { key: Cors__AllowedOrigins__0,       sync: false }

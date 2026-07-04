@@ -135,49 +135,48 @@ ON CONFLICT ("Email") DO NOTHING;
 -- chose; URLs return SVG so they work in any <img> tag.
 INSERT INTO "UserProfiles" (
     "UserId", "DisplayName", "Nickname", "Handle", "ImageUrl",
-    "PhoneNumber", "GoogleVoicePhone", "WhatsAppPhone",
-    "InstagramHandle", "TelegramHandle", "SignalPhone",
+    "GoogleVoicePhone", "WhatsAppPhone",
+    "InstagramHandle", "TelegramHandle", "SnapchatHandle", "SignalPhone",
     "ProfileVisibility", "ContactVisibility",
     "CreatedAtUtc"
 )
 SELECT u."Id",
        v.display_name, v.nickname, v.handle, v.image_url,
-       v.phone, v.google_voice, v.whatsapp,
-       v.instagram, v.telegram, v.signal,
+       v.google_voice, v.whatsapp,
+       v.instagram, v.telegram, v.snapchat, v.signal,
        v.profile_vis, v.contact_vis,
        now()
 FROM "Users" u
 JOIN (VALUES
-  --                              email                              display_name        nickname  handle             image_url                                                                          phone              google_voice       whatsapp           instagram     telegram           signal             profile_vis  contact_vis
-  ('friendalice-seed@buzzkeepr.test',     'Alice Friend',     'Alice',          'friendalice',     'https://api.dicebear.com/9.x/adventurer/svg?seed=friendalice',     NULL,              NULL,              NULL,              NULL,         NULL,              NULL,              'Public',    'Private'),
-  ('friendbob-seed@buzzkeepr.test',       'Bob Friend',       'Bob',            'friendbob',       'https://api.dicebear.com/9.x/adventurer/svg?seed=friendbob',       NULL,              NULL,              NULL,              NULL,         NULL,              NULL,              'Public',    'Private'),
-  ('pendingoutcarol-seed@buzzkeepr.test', 'Carol Pending',    'Carol',          'pendingoutcarol', NULL,                                                              NULL,              NULL,              NULL,              NULL,         NULL,              NULL,              'Public',    'Private'),
-  ('pendingindave-seed@buzzkeepr.test',   'Dave Pending',     'Dave',           'pendingindave',   'https://api.dicebear.com/9.x/adventurer/svg?seed=pendingindave',   NULL,              NULL,              NULL,              NULL,         NULL,              NULL,              'Public',    'Private'),
-  ('blockederin-seed@buzzkeepr.test',     'Erin Blocked',     'Erin',           'blockederin',     'https://api.dicebear.com/9.x/adventurer/svg?seed=blockederin',     NULL,              NULL,              NULL,              NULL,         NULL,              NULL,              'Public',    'Private'),
-  ('flaggedfaith-seed@buzzkeepr.test',    'Faith Flagged',    'Faith',          'flaggedfaith',    NULL,                                                              NULL,              NULL,              NULL,              NULL,         NULL,              NULL,              'Public',    'Private'),
-  -- Public contact → fields visible to everyone, including strangers
-  ('publicpaul-seed@buzzkeepr.test',      'Paul Public',      'Paul',           'publicpaul',      'https://api.dicebear.com/9.x/adventurer/svg?seed=publicpaul',      '(415) 555-1001',  '(415) 555-2001',  '(415) 555-3001',  'paulinsta',  '(415) 555-4001',  '(415) 555-5001',  'Public',    'ConnectionsOnly'),
-  ('publicpat-seed@buzzkeepr.test',       'Pat Public',       'Pat',            'publicpat',       'https://api.dicebear.com/9.x/adventurer/svg?seed=publicpat',       '(415) 555-1002',  '(415) 555-2002',  '(415) 555-3002',  'patinsta',   '(415) 555-4002',  '(415) 555-5002',  'Public',    'ConnectionsOnly'),
+  --                              email                              display_name        nickname  handle             image_url                                                                          google_voice       whatsapp           instagram     telegram           snapchat          signal             profile_vis  contact_vis
+  ('friendalice-seed@buzzkeepr.test',     'Alice Friend',     'Alice',          'friendalice',     'https://api.dicebear.com/9.x/adventurer/svg?seed=friendalice',     NULL,              NULL,              NULL,         NULL,              NULL,             NULL,              'Public',    'Private'),
+  ('friendbob-seed@buzzkeepr.test',       'Bob Friend',       'Bob',            'friendbob',       'https://api.dicebear.com/9.x/adventurer/svg?seed=friendbob',       NULL,              NULL,              NULL,         NULL,              NULL,             NULL,              'Public',    'Private'),
+  ('pendingoutcarol-seed@buzzkeepr.test', 'Carol Pending',    'Carol',          'pendingoutcarol', NULL,                                                              NULL,              NULL,              NULL,         NULL,              NULL,             NULL,              'Public',    'Private'),
+  ('pendingindave-seed@buzzkeepr.test',   'Dave Pending',     'Dave',           'pendingindave',   'https://api.dicebear.com/9.x/adventurer/svg?seed=pendingindave',   NULL,              NULL,              NULL,         NULL,              NULL,             NULL,              'Public',    'Private'),
+  ('blockederin-seed@buzzkeepr.test',     'Erin Blocked',     'Erin',           'blockederin',     'https://api.dicebear.com/9.x/adventurer/svg?seed=blockederin',     NULL,              NULL,              NULL,         NULL,              NULL,             NULL,              'Public',    'Private'),
+  ('flaggedfaith-seed@buzzkeepr.test',    'Faith Flagged',    'Faith',          'flaggedfaith',    NULL,                                                              NULL,              NULL,              NULL,         NULL,              NULL,             NULL,              'Public',    'Private'),
   -- ConnectionsOnly contact → fields visible only to accepted friends
-  ('friendconnie-seed@buzzkeepr.test',    'Connie Connect',   'Connie',         'friendconnie',    'https://api.dicebear.com/9.x/adventurer/svg?seed=friendconnie',    '(415) 555-1003',  '(415) 555-2003',  '(415) 555-3003',  'connieinsta','(415) 555-4003',  '(415) 555-5003',  'Public',    'ConnectionsOnly'),
-  ('strangermark-seed@buzzkeepr.test',    'Mark Stranger',    'Mark',           'strangermark',    NULL,                                                              '(415) 555-1004',  '(415) 555-2004',  '(415) 555-3004',  'markinsta',  '(415) 555-4004',  '(415) 555-5004',  'Public',    'ConnectionsOnly'),
+  ('publicpaul-seed@buzzkeepr.test',      'Paul Public',      'Paul',           'publicpaul',      'https://api.dicebear.com/9.x/adventurer/svg?seed=publicpaul',      '(415) 555-2001',  '(415) 555-3001',  'paulinsta',  '(415) 555-4001',  'paulsnap',       '(415) 555-5001',  'Public',    'ConnectionsOnly'),
+  ('publicpat-seed@buzzkeepr.test',       'Pat Public',       'Pat',            'publicpat',       'https://api.dicebear.com/9.x/adventurer/svg?seed=publicpat',       '(415) 555-2002',  '(415) 555-3002',  'patinsta',   '(415) 555-4002',  'patsnap',        '(415) 555-5002',  'Public',    'ConnectionsOnly'),
+  ('friendconnie-seed@buzzkeepr.test',    'Connie Connect',   'Connie',         'friendconnie',    'https://api.dicebear.com/9.x/adventurer/svg?seed=friendconnie',    '(415) 555-2003',  '(415) 555-3003',  'connieinsta','(415) 555-4003',  'conniesnap',     '(415) 555-5003',  'Public',    'ConnectionsOnly'),
+  ('strangermark-seed@buzzkeepr.test',    'Mark Stranger',    'Mark',           'strangermark',    NULL,                                                              '(415) 555-2004',  '(415) 555-3004',  'markinsta',  '(415) 555-4004',  'marksnap',       '(415) 555-5004',  'Public',    'ConnectionsOnly'),
   -- Private contact → fields hidden from everyone, even friends (strict gating)
-  ('privatepriya-seed@buzzkeepr.test',    'Priya Private',    'Priya',          'privatepriya',    NULL,                                                              '(415) 555-1005',  '(415) 555-2005',  '(415) 555-3005',  'priyainsta', '(415) 555-4005',  '(415) 555-5005',  'Public',    'Private'),
+  ('privatepriya-seed@buzzkeepr.test',    'Priya Private',    'Priya',          'privatepriya',    NULL,                                                              '(415) 555-2005',  '(415) 555-3005',  'priyainsta', '(415) 555-4005',  'priyasnap',      '(415) 555-5005',  'Public',    'Private'),
   -- Private profile → entire row excluded from search results
-  ('hiddenharry-seed@buzzkeepr.test',     'Harry Hidden',     'Harry',          'hiddenharry',     NULL,                                                              '(415) 555-1006',  '(415) 555-2006',  '(415) 555-3006',  'harryinsta', '(415) 555-4006',  '(415) 555-5006',  'Private',   'Private'),
-  -- Second Public stranger (distinct from publicpat) so the stranger+Public case has two test rows
-  ('openomar-seed@buzzkeepr.test',        'Omar Open',        'Omar',           'openomar',        'https://api.dicebear.com/9.x/adventurer/svg?seed=openomar',        '(415) 555-1007',  '(415) 555-2007',  '(415) 555-3007',  'omarinsta',  '(415) 555-4007',  '(415) 555-5007',  'Public',    'ConnectionsOnly')
-) AS v(email, display_name, nickname, handle, image_url, phone, google_voice, whatsapp, instagram, telegram, signal, profile_vis, contact_vis) ON v.email = u."Email"
+  ('hiddenharry-seed@buzzkeepr.test',     'Harry Hidden',     'Harry',          'hiddenharry',     NULL,                                                              '(415) 555-2006',  '(415) 555-3006',  'harryinsta', '(415) 555-4006',  'harrysnap',      '(415) 555-5006',  'Private',   'Private'),
+  -- Second stranger with ConnectionsOnly contact so the stranger case has two test rows
+  ('openomar-seed@buzzkeepr.test',        'Omar Open',        'Omar',           'openomar',        'https://api.dicebear.com/9.x/adventurer/svg?seed=openomar',        '(415) 555-2007',  '(415) 555-3007',  'omarinsta',  '(415) 555-4007',  'omarsnap',       '(415) 555-5007',  'Public',    'ConnectionsOnly')
+) AS v(email, display_name, nickname, handle, image_url, google_voice, whatsapp, instagram, telegram, snapchat, signal, profile_vis, contact_vis) ON v.email = u."Email"
 ON CONFLICT ("UserId") DO UPDATE SET
   "DisplayName"      = EXCLUDED."DisplayName",
   "Nickname"         = EXCLUDED."Nickname",
   "Handle"           = EXCLUDED."Handle",
   "ImageUrl"         = EXCLUDED."ImageUrl",
-  "PhoneNumber"      = EXCLUDED."PhoneNumber",
   "GoogleVoicePhone" = EXCLUDED."GoogleVoicePhone",
   "WhatsAppPhone"    = EXCLUDED."WhatsAppPhone",
   "InstagramHandle"  = EXCLUDED."InstagramHandle",
   "TelegramHandle"   = EXCLUDED."TelegramHandle",
+  "SnapchatHandle"   = EXCLUDED."SnapchatHandle",
   "SignalPhone"      = EXCLUDED."SignalPhone",
   "ProfileVisibility" = EXCLUDED."ProfileVisibility",
   "ContactVisibility" = EXCLUDED."ContactVisibility",
@@ -313,7 +312,7 @@ echo "  # Friends list — should show 5 rows (alice, bob, paul, connie, priya).
 echo "  # Backgrounds: alice/bob/paul/connie Approved, priya None (no row → empty state)."
 echo "  query { friends(first: 20) {"
 echo "    edges { node {"
-echo "      handle nickname contactVisibility phoneNumber"
+echo "      handle nickname contactVisibility snapchatHandle"
 echo "      backgroundCheckBadge checkrLastCheckAtUtc backgroundCheckBadgeExpiresAtUtc"
 echo "    } }"
 echo "  } }"
@@ -327,17 +326,17 @@ echo "  query { outgoingFriendRequests(first: 20) { edges { node { handle } } } 
 echo ""
 echo "  # Search 'public' — both publicpaul + publicpat appear, contact fields populated"
 echo "  query { searchUsers(query: \"public\", first: 10) {"
-echo "    edges { node { handle contactVisibility phoneNumber instagramHandle viewerFriendshipState } }"
+echo "    edges { node { handle contactVisibility snapchatHandle instagramHandle viewerFriendshipState } }"
 echo "  } }"
 echo ""
 echo "  # Search 'connect' — friendconnie shows with contact (friend), strangermark shows with NULL contact (not friend)"
 echo "  query { searchUsers(query: \"connect\", first: 10) {"
-echo "    edges { node { handle contactVisibility phoneNumber viewerFriendshipState } }"
+echo "    edges { node { handle contactVisibility snapchatHandle viewerFriendshipState } }"
 echo "  } }"
 echo ""
 echo "  # Search 'priya' — appears but contact is NULL (Private always hides, even on friend list)"
 echo "  query { searchUsers(query: \"priya\", first: 10) {"
-echo "    edges { node { handle contactVisibility phoneNumber } }"
+echo "    edges { node { handle contactVisibility snapchatHandle } }"
 echo "  } }"
 echo ""
 echo "  # Search 'harry' — empty (ProfileVisibility=Private excludes from search entirely)"

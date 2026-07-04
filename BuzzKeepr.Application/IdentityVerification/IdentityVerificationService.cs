@@ -307,6 +307,11 @@ public sealed class IdentityVerificationService(
         var hasExistingProfile = !string.IsNullOrWhiteSpace(bc?.CheckrProfileId);
         var trimmedPhone = string.IsNullOrWhiteSpace(input.PhoneNumber) ? null : input.PhoneNumber.Trim();
         var effectivePhone = trimmedPhone ?? user.Profile?.PhoneNumber;
+        // LicenseState fallback chain: caller-supplied input → whatever Persona persisted from the
+        // government-ID verification. Passport-verified users have no license state on file, so the
+        // frontend prompts for one on the Checkr screen when Persona didn't populate it.
+        var normalizedInputState = NormalizeStateCode(input.LicenseState);
+        var effectiveState = normalizedInputState ?? iv?.VerifiedLicenseState;
 
         if (!hasExistingProfile
             && (string.IsNullOrWhiteSpace(iv?.VerifiedFirstName) || string.IsNullOrWhiteSpace(iv.VerifiedLastName)))
@@ -332,7 +337,7 @@ public sealed class IdentityVerificationService(
                 MiddleName = iv.VerifiedMiddleName,
                 LastName = iv.VerifiedLastName!,
                 Birthdate = iv.VerifiedBirthdate,
-                State = iv.VerifiedLicenseState,
+                State = effectiveState,
                 PhoneNumber = effectivePhone
             };
 
@@ -364,6 +369,16 @@ public sealed class IdentityVerificationService(
 
         if (!string.IsNullOrWhiteSpace(trimmedPhone))
             user.EnsureProfile().PhoneNumber = trimmedPhone;
+
+        // Persist caller-supplied state only when Persona didn't already verify one — passport
+        // users have no license state on file and need this to Checkr. When Persona did verify a
+        // state (driver's license path), that value stays authoritative and self-reported input
+        // never overwrites it.
+        if (!string.IsNullOrWhiteSpace(normalizedInputState)
+            && string.IsNullOrWhiteSpace(iv?.VerifiedLicenseState))
+        {
+            user.EnsureIdentityVerification().VerifiedLicenseState = normalizedInputState;
+        }
 
         await identityVerificationRepository.SaveChangesAsync(cancellationToken);
 

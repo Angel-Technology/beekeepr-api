@@ -47,6 +47,8 @@ public static class DependencyInjection
             configuration.GetSection(RevenueCatOptions.SectionName));
         services.Configure<ApnsOptions>(
             configuration.GetSection(ApnsOptions.SectionName));
+        services.Configure<FcmOptions>(
+            configuration.GetSection(FcmOptions.SectionName));
 
         var emailOptions = configuration
             .GetSection(EmailDeliveryOptions.SectionName)
@@ -138,6 +140,9 @@ public static class DependencyInjection
             httpClient.DefaultRequestVersion = System.Net.HttpVersion.Version20;
             httpClient.DefaultVersionPolicy = System.Net.Http.HttpVersionPolicy.RequestVersionExact;
         });
+        // FCM client is a singleton — FirebaseApp is process-wide and initialization parses the
+        // service-account JSON. Scoped lifetime would recreate the SDK on every request.
+        services.AddSingleton<Application.Notifications.IFcmPushClient, Notifications.FcmPushClient>();
         services.AddScoped<PersonaWebhookSignatureVerifier>();
         services.AddScoped<RevenueCatWebhookAuthorizer>();
         services.AddHostedService<Auth.SessionCleanupBackgroundService>();

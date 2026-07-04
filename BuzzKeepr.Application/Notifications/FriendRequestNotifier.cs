@@ -7,6 +7,7 @@ public sealed class FriendRequestNotifier(
     IPushTokenRepository pushTokenRepository,
     INotificationProfileLookup profileLookup,
     IApnsPushClient apnsPushClient,
+    IFcmPushClient fcmPushClient,
     ILogger<FriendRequestNotifier> logger) : IFriendRequestNotifier
 {
     // APNs error reasons that mean "this token is dead, never send to it again." Apple uses
@@ -59,19 +60,12 @@ public sealed class FriendRequestNotifier(
                 return;
             }
 
-            // Branch by platform. iOS goes through APNs; Android will go through FCM once we
-            // wire it up, but for now we log + skip so the call site stays correct.
+            // Branch by platform. iOS goes through APNs; Android goes through FCM. Both use
+            // the same PushReceipt shape so the prune path can treat receipts uniformly below.
             var iosTokens = allTokens.Where(t => t.Platform == PushPlatform.iOS).Select(t => t.Token).ToList();
-            var androidCount = allTokens.Count(t => t.Platform == PushPlatform.Android);
-            if (androidCount > 0)
-            {
-                logger.LogInformation(
-                    "Skipping {AndroidCount} Android token(s) for user {RecipientUserId}: FCM not yet wired (TODO).",
-                    androidCount,
-                    recipientUserId);
-            }
+            var androidTokens = allTokens.Where(t => t.Platform == PushPlatform.Android).Select(t => t.Token).ToList();
 
-            if (iosTokens.Count == 0)
+            if (iosTokens.Count == 0 && androidTokens.Count == 0)
                 return;
 
             // Display-name fallback chain: DisplayName → Nickname → Handle → generic "Someone".
@@ -80,22 +74,32 @@ public sealed class FriendRequestNotifier(
             var actorProfile = await profileLookup.GetDisplayNameAsync(actorUserId, cancellationToken);
             var displayName = actorProfile ?? "Someone";
 
-            var receipts = await apnsPushClient.SendAsync(
-                iosTokens,
-                title: buildTitle(displayName),
-                body: buildBody(displayName),
-                data: new Dictionary<string, string>
-                {
-                    ["type"] = type,
-                    // Frontend deep-link payload — tap routes to the right screen based on type
-                    // and (where applicable) the actor's user id so we can highlight the row.
-                    ["actorUserId"] = actorUserId.ToString()
-                },
-                cancellationToken);
+            var title = buildTitle(displayName);
+            var body = buildBody(displayName);
+            var payload = new Dictionary<string, string>
+            {
+                ["type"] = type,
+                // Frontend deep-link payload — tap routes to the right screen based on type
+                // and (where applicable) the actor's user id so we can highlight the row.
+                ["actorUserId"] = actorUserId.ToString()
+            };
 
-            // Prune tokens APNs reports as dead. Same-direction recursion isn't a concern — we
-            // delete by string match, so even if the user has been re-issued a new token since,
-            // it would have a different string.
+            // Fan out to both providers in parallel. A stalled iOS request shouldn't hold up
+            // Android delivery and vice versa.
+            var iosTask = iosTokens.Count > 0
+                ? apnsPushClient.SendAsync(iosTokens, title, body, payload, cancellationToken)
+                : Task.FromResult<IReadOnlyList<PushReceipt>>([]);
+            var androidTask = androidTokens.Count > 0
+                ? fcmPushClient.SendAsync(androidTokens, title, body, payload, cancellationToken)
+                : Task.FromResult<IReadOnlyList<PushReceipt>>([]);
+
+            await Task.WhenAll(iosTask, androidTask);
+
+            var receipts = iosTask.Result.Concat(androidTask.Result).ToList();
+
+            // Prune tokens either provider reports as dead. Same-direction recursion isn't a
+            // concern — we delete by string match, so even if the user has been re-issued a new
+            // token since, it would have a different string.
             var deadTokens = receipts
                 .Where(r => r.ErrorCode is not null && DeadTokenErrorCodes.Contains(r.ErrorCode))
                 .Select(r => r.Token)
@@ -105,14 +109,14 @@ public sealed class FriendRequestNotifier(
             {
                 var deleted = await pushTokenRepository.DeleteByTokensAsync(deadTokens, cancellationToken);
                 logger.LogInformation(
-                    "Pruned {Deleted} dead push token(s) reported by APNs for user {RecipientUserId}.",
+                    "Pruned {Deleted} dead push token(s) for user {RecipientUserId}.",
                     deleted,
                     recipientUserId);
             }
 
             var deliveredCount = receipts.Count(r => r.Ok);
             logger.LogInformation(
-                "{Type} push delivered to {Delivered}/{Total} APNs token(s) for user {RecipientUserId}.",
+                "{Type} push delivered to {Delivered}/{Total} token(s) for user {RecipientUserId}.",
                 type,
                 deliveredCount,
                 receipts.Count,
