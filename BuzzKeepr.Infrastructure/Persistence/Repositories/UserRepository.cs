@@ -126,12 +126,6 @@ public sealed class UserRepository(BuzzKeeprDbContext dbContext) : IUserReposito
                 // independently; EF translates to a CASE per field, and the friend-EXISTS
                 // subquery hits the (RequesterId,Status)/(AddresseeId,Status) indexes so each
                 // evaluation is cheap.
-                PhoneNumber = row.Profile.ContactVisibility == ContactVisibility.ConnectionsOnly
-                    && excludeUserId != null
-                    && dbContext.Friendships.Any(f => f.Status == FriendshipStatus.Accepted
-                        && ((f.RequesterId == excludeUserId && f.AddresseeId == row.User.Id)
-                            || (f.RequesterId == row.User.Id && f.AddresseeId == excludeUserId)))
-                    ? row.Profile.PhoneNumber : null,
                 GoogleVoicePhone = row.Profile.ContactVisibility == ContactVisibility.ConnectionsOnly
                     && excludeUserId != null
                     && dbContext.Friendships.Any(f => f.Status == FriendshipStatus.Accepted
@@ -156,6 +150,12 @@ public sealed class UserRepository(BuzzKeeprDbContext dbContext) : IUserReposito
                         && ((f.RequesterId == excludeUserId && f.AddresseeId == row.User.Id)
                             || (f.RequesterId == row.User.Id && f.AddresseeId == excludeUserId)))
                     ? row.Profile.TelegramHandle : null,
+                SnapchatHandle = row.Profile.ContactVisibility == ContactVisibility.ConnectionsOnly
+                    && excludeUserId != null
+                    && dbContext.Friendships.Any(f => f.Status == FriendshipStatus.Accepted
+                        && ((f.RequesterId == excludeUserId && f.AddresseeId == row.User.Id)
+                            || (f.RequesterId == row.User.Id && f.AddresseeId == excludeUserId)))
+                    ? row.Profile.SnapchatHandle : null,
                 SignalPhone = row.Profile.ContactVisibility == ContactVisibility.ConnectionsOnly
                     && excludeUserId != null
                     && dbContext.Friendships.Any(f => f.Status == FriendshipStatus.Accepted

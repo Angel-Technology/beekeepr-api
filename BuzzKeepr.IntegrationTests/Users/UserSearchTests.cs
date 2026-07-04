@@ -151,22 +151,22 @@ public sealed class UserSearchTests(PostgresFixture postgres) : IAsyncLifetime
         var (_, friendToken, friendId) = await SignInAsync2();
         var targetId = await SeedUserAsync(handle: "convocon", displayName: null, nickname: null);
         await SetContactAsync(targetId, ContactVisibility.ConnectionsOnly,
-            phone: "+14155551111", instagram: "coninsta");
+            snapchat: "consnap", instagram: "coninsta");
 
         // Stranger view — caller is not friends with target.
         var strangerResponse = await AuthenticatedClient(callerToken).SendAsync<SearchUsersContactData>(
-            "query { searchUsers(query: \"convocon\", first: 5) { edges { node { id phoneNumber instagramHandle contactVisibility } } } }");
+            "query { searchUsers(query: \"convocon\", first: 5) { edges { node { id snapchatHandle instagramHandle contactVisibility } } } }");
         var strangerNode = strangerResponse.RequireData().SearchUsers.Edges.Single(e => e.Node.Id == targetId).Node;
-        Assert.Null(strangerNode.PhoneNumber);
+        Assert.Null(strangerNode.SnapchatHandle);
         Assert.Null(strangerNode.InstagramHandle);
         Assert.Equal("CONNECTIONS_ONLY", strangerNode.ContactVisibility);
 
         // Friend view — establish friendship between friendId and target, then search as friend.
         await SeedAcceptedFriendshipAsync(friendId, targetId);
         var friendResponse = await AuthenticatedClient(friendToken).SendAsync<SearchUsersContactData>(
-            "query { searchUsers(query: \"convocon\", first: 5) { edges { node { id phoneNumber instagramHandle contactVisibility } } } }");
+            "query { searchUsers(query: \"convocon\", first: 5) { edges { node { id snapchatHandle instagramHandle contactVisibility } } } }");
         var friendNode = friendResponse.RequireData().SearchUsers.Edges.Single(e => e.Node.Id == targetId).Node;
-        Assert.Equal("+14155551111", friendNode.PhoneNumber);
+        Assert.Equal("consnap", friendNode.SnapchatHandle);
         Assert.Equal("coninsta", friendNode.InstagramHandle);
     }
 
@@ -178,13 +178,13 @@ public sealed class UserSearchTests(PostgresFixture postgres) : IAsyncLifetime
         var (callerToken, callerId) = await SignInAsync();
         var targetId = await SeedUserAsync(handle: "privpriv", displayName: null, nickname: null);
         await SetContactAsync(targetId, ContactVisibility.Private,
-            phone: "+14155559999", instagram: "privinsta");
+            snapchat: "privsnap", instagram: "privinsta");
         await SeedAcceptedFriendshipAsync(callerId, targetId);
 
         var response = await AuthenticatedClient(callerToken).SendAsync<SearchUsersContactData>(
-            "query { searchUsers(query: \"privpriv\", first: 5) { edges { node { id phoneNumber instagramHandle contactVisibility } } } }");
+            "query { searchUsers(query: \"privpriv\", first: 5) { edges { node { id snapchatHandle instagramHandle contactVisibility } } } }");
         var node = response.RequireData().SearchUsers.Edges.Single(e => e.Node.Id == targetId).Node;
-        Assert.Null(node.PhoneNumber);
+        Assert.Null(node.SnapchatHandle);
         Assert.Null(node.InstagramHandle);
         Assert.Equal("PRIVATE", node.ContactVisibility);
     }
@@ -313,7 +313,7 @@ public sealed class UserSearchTests(PostgresFixture postgres) : IAsyncLifetime
         return (email, data.Session!.Token, data.User!.Id);
     }
 
-    private async Task SetContactAsync(Guid userId, ContactVisibility visibility, string? phone = null, string? instagram = null)
+    private async Task SetContactAsync(Guid userId, ContactVisibility visibility, string? snapchat = null, string? instagram = null)
     {
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
@@ -329,7 +329,7 @@ public sealed class UserSearchTests(PostgresFixture postgres) : IAsyncLifetime
             dbContext.UserProfiles.Add(profile);
         }
         profile.ContactVisibility = visibility;
-        if (phone is not null) profile.PhoneNumber = phone;
+        if (snapchat is not null) profile.SnapchatHandle = snapchat;
         if (instagram is not null) profile.InstagramHandle = instagram;
         await dbContext.SaveChangesAsync();
     }
@@ -361,7 +361,7 @@ public sealed class UserSearchTests(PostgresFixture postgres) : IAsyncLifetime
     private sealed record SearchUsersContactData(SearchUsersContactConnection SearchUsers);
     private sealed record SearchUsersContactConnection(List<SearchUsersContactEdge> Edges);
     private sealed record SearchUsersContactEdge(SearchUsersContactNode Node);
-    private sealed record SearchUsersContactNode(Guid Id, string? PhoneNumber, string? InstagramHandle, string ContactVisibility);
+    private sealed record SearchUsersContactNode(Guid Id, string? SnapchatHandle, string? InstagramHandle, string ContactVisibility);
 
     private sealed record VerifyData(VerifyPayload VerifyEmailSignIn);
     private sealed record VerifyPayload(VerifyUser? User, VerifySession? Session);

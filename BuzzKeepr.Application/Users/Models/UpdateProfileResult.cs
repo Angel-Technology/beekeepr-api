@@ -14,8 +14,6 @@ public sealed class UpdateProfileResult
 
     public bool DisplayNameTooLong { get; init; }
 
-    public bool PhoneNumberInvalid { get; init; }
-
     public bool ContactFieldTooLong { get; init; }
 
     public bool ImageUrlTooLong { get; init; }

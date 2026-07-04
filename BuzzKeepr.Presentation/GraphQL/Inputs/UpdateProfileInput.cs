@@ -12,8 +12,6 @@ public sealed class UpdateProfileInput
 
     public string? ImageUrl { get; init; }
 
-    public string? PhoneNumber { get; init; }
-
     public string? GoogleVoicePhone { get; init; }
 
     public string? WhatsAppPhone { get; init; }
@@ -21,6 +19,8 @@ public sealed class UpdateProfileInput
     public string? InstagramHandle { get; init; }
 
     public string? TelegramHandle { get; init; }
+
+    public string? SnapchatHandle { get; init; }
 
     public string? SignalPhone { get; init; }
 

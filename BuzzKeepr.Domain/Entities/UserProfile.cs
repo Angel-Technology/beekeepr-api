@@ -37,6 +37,8 @@ public sealed class UserProfile
 
     public string? TelegramHandle { get; set; }
 
+    public string? SnapchatHandle { get; set; }
+
     public string? SignalPhone { get; set; }
 
     public ContactVisibility ContactVisibility { get; set; } = ContactVisibility.Private;

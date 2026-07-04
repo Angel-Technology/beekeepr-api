@@ -154,16 +154,12 @@ public sealed class UserService(
         if (!TryNormalizeOptional(input.ImageUrl, ImageUrlMaxLength, out var normalizedImageUrl))
             return new UpdateProfileResult { ImageUrlTooLong = true };
 
-        if (!TryNormalizeOptional(input.PhoneNumber, PhoneMaxLength, out var normalizedPhone)
-            || !TryNormalizeOptional(input.GoogleVoicePhone, PhoneMaxLength, out var normalizedGoogleVoice)
+        if (!TryNormalizeOptional(input.GoogleVoicePhone, PhoneMaxLength, out var normalizedGoogleVoice)
             || !TryNormalizeOptional(input.WhatsAppPhone, PhoneMaxLength, out var normalizedWhatsApp)
-            || !TryNormalizeOptional(input.SignalPhone, PhoneMaxLength, out var normalizedSignal))
-        {
-            return new UpdateProfileResult { PhoneNumberInvalid = true };
-        }
-
-        if (!TryNormalizeOptional(input.InstagramHandle, SocialHandleMaxLength, out var normalizedInstagram)
-            || !TryNormalizeOptional(input.TelegramHandle, SocialHandleMaxLength, out var normalizedTelegram))
+            || !TryNormalizeOptional(input.SignalPhone, PhoneMaxLength, out var normalizedSignal)
+            || !TryNormalizeOptional(input.InstagramHandle, SocialHandleMaxLength, out var normalizedInstagram)
+            || !TryNormalizeOptional(input.TelegramHandle, SocialHandleMaxLength, out var normalizedTelegram)
+            || !TryNormalizeOptional(input.SnapchatHandle, SocialHandleMaxLength, out var normalizedSnapchat))
         {
             return new UpdateProfileResult { ContactFieldTooLong = true };
         }
@@ -172,6 +168,7 @@ public sealed class UserService(
         // to no-leading-@ so storage is consistent and the display layer owns the prefix.
         normalizedInstagram = normalizedInstagram?.TrimStart('@');
         normalizedTelegram = normalizedTelegram?.TrimStart('@');
+        normalizedSnapchat = normalizedSnapchat?.TrimStart('@');
 
         var user = await userRepository.GetByIdForUpdateAsync(userId, cancellationToken);
 
@@ -202,9 +199,6 @@ public sealed class UserService(
         if (input.ImageUrl is not null)
             profile.ImageUrl = normalizedImageUrl;
 
-        if (input.PhoneNumber is not null)
-            profile.PhoneNumber = normalizedPhone;
-
         if (input.GoogleVoicePhone is not null)
             profile.GoogleVoicePhone = normalizedGoogleVoice;
 
@@ -216,6 +210,9 @@ public sealed class UserService(
 
         if (input.TelegramHandle is not null)
             profile.TelegramHandle = normalizedTelegram;
+
+        if (input.SnapchatHandle is not null)
+            profile.SnapchatHandle = normalizedSnapchat;
 
         if (input.SignalPhone is not null)
             profile.SignalPhone = normalizedSignal;
@@ -356,11 +353,11 @@ public sealed class UserService(
             Nickname = profile?.Nickname,
             Handle = profile?.Handle,
             ImageUrl = profile?.ImageUrl,
-            PhoneNumber = profile?.PhoneNumber,
             GoogleVoicePhone = profile?.GoogleVoicePhone,
             WhatsAppPhone = profile?.WhatsAppPhone,
             InstagramHandle = profile?.InstagramHandle,
             TelegramHandle = profile?.TelegramHandle,
+            SnapchatHandle = profile?.SnapchatHandle,
             SignalPhone = profile?.SignalPhone,
             ProfileVisibility = profile?.ProfileVisibility ?? ProfileVisibility.Public,
             ContactVisibility = profile?.ContactVisibility ?? ContactVisibility.Private,

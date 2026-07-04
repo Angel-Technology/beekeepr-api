@@ -23,11 +23,11 @@ public sealed class UserGraph
         VerifiedLastName = user.VerifiedLastName,
         VerifiedBirthdate = user.VerifiedBirthdate,
         VerifiedLicenseState = user.VerifiedLicenseState,
-        PhoneNumber = user.PhoneNumber,
         GoogleVoicePhone = user.GoogleVoicePhone,
         WhatsAppPhone = user.WhatsAppPhone,
         InstagramHandle = user.InstagramHandle,
         TelegramHandle = user.TelegramHandle,
+        SnapchatHandle = user.SnapchatHandle,
         SignalPhone = user.SignalPhone,
         ProfileVisibility = user.ProfileVisibility,
         ContactVisibility = user.ContactVisibility,
@@ -71,8 +71,6 @@ public sealed class UserGraph
 
     public string? VerifiedLicenseState { get; init; }
 
-    public string? PhoneNumber { get; init; }
-
     public string? GoogleVoicePhone { get; init; }
 
     public string? WhatsAppPhone { get; init; }
@@ -80,6 +78,8 @@ public sealed class UserGraph
     public string? InstagramHandle { get; init; }
 
     public string? TelegramHandle { get; init; }
+
+    public string? SnapchatHandle { get; init; }
 
     public string? SignalPhone { get; init; }
 

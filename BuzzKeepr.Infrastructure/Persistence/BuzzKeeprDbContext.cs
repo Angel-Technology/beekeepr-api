@@ -84,6 +84,9 @@ public sealed class BuzzKeeprDbContext(DbContextOptions<BuzzKeeprDbContext> opti
             builder.Property(profile => profile.TelegramHandle)
                 .HasMaxLength(64);
 
+            builder.Property(profile => profile.SnapchatHandle)
+                .HasMaxLength(64);
+
             builder.Property(profile => profile.SignalPhone)
                 .HasMaxLength(32);
 

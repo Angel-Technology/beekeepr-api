@@ -354,11 +354,11 @@ public sealed class UserMutations
                 Handle = input.Handle,
                 DisplayName = input.DisplayName,
                 ImageUrl = input.ImageUrl,
-                PhoneNumber = input.PhoneNumber,
                 GoogleVoicePhone = input.GoogleVoicePhone,
                 WhatsAppPhone = input.WhatsAppPhone,
                 InstagramHandle = input.InstagramHandle,
                 TelegramHandle = input.TelegramHandle,
+                SnapchatHandle = input.SnapchatHandle,
                 SignalPhone = input.SignalPhone,
                 ProfileVisibility = input.ProfileVisibility,
                 ContactVisibility = input.ContactVisibility
@@ -379,9 +379,6 @@ public sealed class UserMutations
 
         if (result.ImageUrlTooLong)
             return new UpdateProfilePayload { Error = "Image URL must be 2048 characters or fewer." };
-
-        if (result.PhoneNumberInvalid)
-            return new UpdateProfilePayload { Error = "Phone number must be 32 characters or fewer." };
 
         if (result.ContactFieldTooLong)
             return new UpdateProfilePayload { Error = "Contact handle must be 64 characters or fewer." };

@@ -33,8 +33,6 @@ public sealed class UserSearchResultDto
 
     public ContactVisibility ContactVisibility { get; init; } = ContactVisibility.Private;
 
-    public string? PhoneNumber { get; init; }
-
     public string? GoogleVoicePhone { get; init; }
 
     public string? WhatsAppPhone { get; init; }
@@ -42,6 +40,8 @@ public sealed class UserSearchResultDto
     public string? InstagramHandle { get; init; }
 
     public string? TelegramHandle { get; init; }
+
+    public string? SnapchatHandle { get; init; }
 
     public string? SignalPhone { get; init; }
 

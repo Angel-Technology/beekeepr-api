@@ -35,8 +35,6 @@ public sealed class UserDto
 
     public string? VerifiedLicenseState { get; init; }
 
-    public string? PhoneNumber { get; init; }
-
     public DateTime? PersonaVerifiedAtUtc { get; init; }
 
     public BackgroundCheckBadge BackgroundCheckBadge { get; init; } = BackgroundCheckBadge.None;
@@ -56,6 +54,8 @@ public sealed class UserDto
     public string? InstagramHandle { get; init; }
 
     public string? TelegramHandle { get; init; }
+
+    public string? SnapchatHandle { get; init; }
 
     public string? SignalPhone { get; init; }
 
