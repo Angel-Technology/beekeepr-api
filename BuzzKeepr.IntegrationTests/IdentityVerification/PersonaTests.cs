@@ -75,9 +75,9 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Webhook_ApprovedInquiryForEmailSignInUser_TriggersDeferredWelcomeWithVerifiedFirstName()
+    public async Task Webhook_ApprovedInquiry_DoesNotResendWelcomeAlreadySentAtSignup()
     {
-        const string inquiryId = "inq_persona_deferred_welcome";
+        const string inquiryId = "inq_persona_welcome_once";
         factory.FakePersona.NextCreateInquiryResult = new CreatePersonaInquiryResult
         {
             Success = true,
@@ -87,7 +87,8 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
 
         var (token, userId, email) = await SignInAsync();
 
-        Assert.DoesNotContain(factory.FakeWelcomeSender.Sent, w => w.Email == email);
+        // Welcome fires inline at sign-in now — Persona approval must not resend it.
+        Assert.Single(factory.FakeWelcomeSender.Sent, w => w.Email == email);
 
         var http = factory.CreateClient();
         http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
@@ -107,8 +108,7 @@ public sealed class PersonaTests(PostgresFixture postgres) : IAsyncLifetime
         var webhookResponse = await PostWebhookAsync(webhookBody, BuildSignatureHeader(WebhookSecret, webhookBody));
         Assert.Equal(HttpStatusCode.NoContent, webhookResponse.StatusCode);
 
-        var welcome = factory.FakeWelcomeSender.Sent.Single(w => w.Email == email);
-        Assert.Equal("Sienna", welcome.DisplayName);
+        Assert.Single(factory.FakeWelcomeSender.Sent, w => w.Email == email);
 
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();

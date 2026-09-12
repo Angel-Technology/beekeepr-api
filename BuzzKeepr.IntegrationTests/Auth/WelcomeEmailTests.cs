@@ -21,7 +21,7 @@ public sealed class WelcomeEmailTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task EmailSignIn_NewUser_DefersWelcomeUntilNameAvailable()
+    public async Task EmailSignIn_NewUser_SendsWelcomeImmediately()
     {
         var email = $"welcome-email-{Guid.NewGuid():N}@buzzkeepr.test";
         var graphql = new GraphQLClient(factory.CreateClient());
@@ -35,12 +35,12 @@ public sealed class WelcomeEmailTests(PostgresFixture postgres) : IAsyncLifetime
             new { input = new { email, code } });
         var userId = verify.RequireData().VerifyEmailSignIn.User!.Id;
 
-        Assert.DoesNotContain(factory.FakeWelcomeSender.Sent, w => w.Email == email);
+        Assert.Contains(factory.FakeWelcomeSender.Sent, w => w.Email == email);
 
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
         var user = await dbContext.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
-        Assert.Null(user.WelcomeEmailSentAtUtc);
+        Assert.NotNull(user.WelcomeEmailSentAtUtc);
     }
 
     [Fact]
@@ -58,6 +58,7 @@ public sealed class WelcomeEmailTests(PostgresFixture postgres) : IAsyncLifetime
             new { input = new { email, code = code1 } });
 
         var sentAfterFirst = factory.FakeWelcomeSender.Sent.Count(w => w.Email == email);
+        Assert.Equal(1, sentAfterFirst);
 
         await graphql.SendAsync<JsonElement>(
             "mutation($input: RequestEmailSignInInput!) { requestEmailSignIn(input: $input) { success } }",
@@ -71,11 +72,8 @@ public sealed class WelcomeEmailTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task GoogleSignIn_NewUser_DefersWelcomeUntilProfileCompleted()
+    public async Task GoogleSignIn_NewUser_SendsWelcomeImmediately()
     {
-        // App Store compliance: we no longer capture DisplayName from Google. Even though
-        // Google's payload has a name, the welcome email defers until the user provides one
-        // through the profile-completion flow.
         const string idToken = "google-token-welcome";
         var email = $"welcome-google-{Guid.NewGuid():N}@buzzkeepr.test";
         factory.FakeGoogleVerifier.RegisterValidToken(idToken, new GoogleIdentity
@@ -91,14 +89,14 @@ public sealed class WelcomeEmailTests(PostgresFixture postgres) : IAsyncLifetime
             "mutation($input: SignInWithGoogleInput!) { signInWithGoogle(input: $input) { user { id } error } }",
             new { input = new { idToken } });
 
-        Assert.DoesNotContain(factory.FakeWelcomeSender.Sent, w => w.Email == email);
+        Assert.Contains(factory.FakeWelcomeSender.Sent, w => w.Email == email);
     }
 
     [Fact]
-    public async Task CreateUser_DefersWelcomeUntilProfileCompleted()
+    public async Task CreateUser_SendsWelcomeImmediatelyWithoutDisplayName()
     {
-        // Signup mutation takes email only — no DisplayName to greet by, so welcome defers
-        // to the sweeper which fires once a profile is filled in.
+        // Signup mutation takes email only — no DisplayName. Welcome still fires; the sender
+        // falls back to the "Newbee" generic greeting.
         var email = $"welcome-create-{Guid.NewGuid():N}@buzzkeepr.test";
         var graphql = new GraphQLClient(factory.CreateClient());
 
@@ -107,12 +105,13 @@ public sealed class WelcomeEmailTests(PostgresFixture postgres) : IAsyncLifetime
             new { input = new { email } });
 
         var userId = create.RequireData().CreateUser.User!.Id;
-        Assert.DoesNotContain(factory.FakeWelcomeSender.Sent, w => w.Email == email);
+        var welcome = Assert.Single(factory.FakeWelcomeSender.Sent, w => w.Email == email);
+        Assert.Null(welcome.DisplayName);
 
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<BuzzKeeprDbContext>();
         var user = await dbContext.Users.AsNoTracking().FirstAsync(u => u.Id == userId);
-        Assert.Null(user.WelcomeEmailSentAtUtc);
+        Assert.NotNull(user.WelcomeEmailSentAtUtc);
     }
 
     private sealed record VerifyData(VerifyPayload VerifyEmailSignIn);

@@ -1,6 +1,6 @@
 # Feature: Identity Verification — Persona
 
-Status: **Complete.** Inquiry creation, signature verification, out-of-order tolerance, idempotency, verified-data persistence, deferred-welcome trigger, and integration tests are all in place.
+Status: **Complete.** Inquiry creation, signature verification, out-of-order tolerance, idempotency, verified-data persistence, and integration tests are all in place.
 
 ## What it does
 
@@ -117,13 +117,9 @@ Our handler defends against both via a **monotonic watermark**:
 
 We also avoid re-persisting verified data if it's already on the row (`verified_first_name` non-null) — this prevents the `completed → approved` transition from re-stamping `persona_verified_at_utc` (and protects against any future webhook payload drift overwriting good data).
 
-### Side effect: deferred welcome email
+### No welcome-email side effect
 
-Email-sign-in users have no display name when their `User` row is created, so the welcome email is intentionally deferred (see `.claude/features/authentication-email-signin.md` → "Welcome email — name-gated, hybrid trigger"). Persona is the trigger that resolves the deferral.
-
-After persisting the verified data, `ProcessPersonaWebhookAsync` checks `WelcomeEmailSentAtUtc IS NULL && VerifiedFirstName != null` and calls `TrySendDeferredWelcomeAsync`, which sends through `IWelcomeEmailSender` using the verified first name and stamps `WelcomeEmailSentAtUtc`. Failure is swallowed and logged — the sweeper picks it up next pass.
-
-Google sign-in users and `createUser` consumers already have a name, so they bypass this path entirely (welcome was already sent inline at user creation).
+Persona approval does **not** send the welcome email. As of 2026-09-12 the welcome is sent inline the moment a `User` row is first created in `AuthService` / `UserService.CreateAsync` (see `.claude/features/authentication-email-signin.md` → "Welcome email — inline on every new signup"). `WelcomeEmailSentAtUtc` will always be non-null by the time a Persona webhook lands, so this service has no welcome-email responsibility.
 
 ### Frontend UX guidance
 

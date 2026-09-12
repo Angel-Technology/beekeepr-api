@@ -1,6 +1,5 @@
 using System.Text.Json;
 using BuzzKeepr.Application.IdentityVerification.Models;
-using BuzzKeepr.Application.Users;
 using BuzzKeepr.Domain.Entities;
 using BuzzKeepr.Domain.Enums;
 using Microsoft.Extensions.Logging;
@@ -11,7 +10,6 @@ public sealed class IdentityVerificationService(
     IIdentityVerificationRepository identityVerificationRepository,
     IPersonaClient personaClient,
     ICheckrTrustClient checkrTrustClient,
-    IWelcomeEmailSender welcomeEmailSender,
     ILogger<IdentityVerificationService> logger) : IIdentityVerificationService
 {
     private static readonly HashSet<IdentityVerificationStatus> RetryableStatuses =
@@ -266,15 +264,6 @@ public sealed class IdentityVerificationService(
             iv.PersonaVerifiedAtUtc = DateTime.UtcNow;
         }
 
-        // Email-sign-in users have no display name when they sign up, so the welcome email
-        // was deferred (see AuthService.VerifyEmailSignInAsync). Now that Persona has given
-        // us a real name, send the welcome — once.
-        if (user.WelcomeEmailSentAtUtc is null
-            && !string.IsNullOrWhiteSpace(iv.VerifiedFirstName))
-        {
-            await TrySendDeferredWelcomeAsync(user, iv.VerifiedFirstName, cancellationToken);
-        }
-
         await identityVerificationRepository.SaveChangesAsync(cancellationToken);
 
         logger.LogInformation(
@@ -508,25 +497,6 @@ public sealed class IdentityVerificationService(
         }
 
         return null;
-    }
-
-    private async Task TrySendDeferredWelcomeAsync(User user, string? verifiedFirstName, CancellationToken cancellationToken)
-    {
-        try
-        {
-            // SendWelcomeAsync's second arg is treated as the "display name" — we pass the
-            // verified first name directly. The sender's own first-token-extraction is a no-op
-            // on a single token, so this renders as "Welcome to BuzzKeepr, {firstName}."
-            await welcomeEmailSender.SendWelcomeAsync(user.Email, verifiedFirstName, cancellationToken);
-            user.WelcomeEmailSentAtUtc = DateTime.UtcNow;
-        }
-        catch (Exception exception)
-        {
-            logger.LogWarning(
-                exception,
-                "Deferred welcome email failed to send for user {UserId} on Persona approval; sweeper will retry.",
-                user.Id);
-        }
     }
 
     private static string? NormalizeStateCode(string? raw)
