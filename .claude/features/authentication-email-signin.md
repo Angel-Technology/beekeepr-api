@@ -114,7 +114,7 @@ The HTML lives in the **Resend dashboard** (not in this repo). Our senders pass 
 | Template id | Trigger | Sender file | Variables passed |
 | --- | --- | --- | --- |
 | `e7042412-cef7-40fb-a805-a197ccf538b1` | `requestEmailSignIn` mutation | `BuzzKeepr.Infrastructure/Auth/ResendEmailSignInSender.cs` | `code` (5-digit), `expires_in_minutes` (int), `email` |
-| `601eecd1-c163-419d-8e4b-def86652881f` | New `User` row created **and** we have a name to address them by | `BuzzKeepr.Infrastructure/Auth/ResendWelcomeEmailSender.cs` | `firstname` (first token of name, `"there"` fallback), `email` |
+| `601eecd1-c163-419d-8e4b-def86652881f` | New `User` row created (any sign-up path) | `BuzzKeepr.Infrastructure/Auth/ResendWelcomeEmailSender.cs` | `firstname` (first token of name, `"Newbee"` fallback when no name is available), `email` |
 
 Template IDs bind to `Email:SignInTemplateId` and `Email:WelcomeTemplateId` in `appsettings*.json` (non-secret).
 
@@ -163,15 +163,14 @@ The prod service declares slots `__0__` and `__1__` in `render.yaml` with `sync:
 
 Implementation: `AuthService.cs:23-24` builds the normalized pin map at construction; `AuthService.RequestEmailSignInAsync` checks `isReviewAccount` before the Resend send and chooses the configured PIN vs. a random 5-digit code accordingly.
 
-### Welcome email — name-gated, hybrid trigger
+### Welcome email — inline on every new signup
 
-The welcome only fires once we have a name to greet the user with. Otherwise the template renders "Welcome to BuzzKeepr, there." which we want to avoid.
+The welcome fires once, inline, the moment a `User` row is first created. No deferral, no sweeper.
 
-- **Inline send (Google + createUser):** `AuthService.SignInWithGoogleAsync` and `UserService.CreateAsync` always have a name in hand (Google profile / explicit `displayName`), so they send inline through `AuthService.TrySendWelcomeAsync`. Wrapped in `try/catch` — Resend hiccups never fail the sign-in.
-- **Inline send (email sign-in, only if name present):** `AuthService.VerifyEmailSignInAsync` only sends inline when `user.DisplayName` is non-empty. New email-sign-in users have no name yet, so the welcome is **deferred**.
-- **Deferred trigger (Persona approval):** `IdentityVerificationService.ProcessPersonaWebhookAsync` calls `TrySendDeferredWelcomeAsync` after persisting verified data, when `WelcomeEmailSentAtUtc IS NULL` and `VerifiedFirstName` is present. This catches the email-sign-in path: Persona gives us a real first name, we use it.
-- On success the sender stamps `User.WelcomeEmailSentAtUtc` (set in the same `SaveChangesAsync` call as the verified data).
-- **Safety net:** `WelcomeEmailSweeperBackgroundService` runs every 15 min, picks up users where `WelcomeEmailSentAtUtc IS NULL AND CreatedAtUtc < now - 5 min AND (DisplayName != null OR VerifiedFirstName != null)`, batches of 50. The name filter is what keeps unnamed-and-unverified users out of the retry loop forever — they only become eligible once a name lands.
+- **Every signup path sends inline:** `AuthService.VerifyEmailSignInAsync` (email), `AuthService.SignInWithGoogleAsync` (Google), `AuthService.SignInWithAppleAsync` (Apple), and `UserService.CreateAsync` (unauthenticated `createUser`) all call `TrySendWelcomeAsync` when `isNewUser` is true. Wrapped in `try/catch` — Resend hiccups never fail the sign-in and are logged as warnings.
+- **Generic fallback:** when we don't have a name yet (email sign-in and `createUser` never do; Apple/Google users may fill their profile later), `ResendWelcomeEmailSender.ExtractFirstName` substitutes `"Newbee"`, so the template renders *"Welcome to BuzzKeepr, Newbee."*
+- **Idempotency:** `TrySendWelcomeAsync` stamps `User.WelcomeEmailSentAtUtc`. Persona approval and returning sign-ins do not resend — the stamp is respected.
+- **No sweeper.** The old `WelcomeEmailSweeperBackgroundService` was removed on 2026-09-12 when this path was simplified. Its Sentry timeouts (Neon cold-start on the sweeper's `ToListAsync`) were the trigger for the redesign; disabling scale-to-zero on the Neon compute (`suspend_timeout_seconds: -1`) removed the connection-side failures, and moving to inline send removed the whole "when do we retry?" question.
 
 ### IP and User-Agent capture
 

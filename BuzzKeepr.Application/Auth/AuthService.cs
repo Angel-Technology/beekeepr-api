@@ -363,7 +363,12 @@ public sealed class AuthService(
                 InvalidToken = true
             };
 
-        var normalizedEmail = NormalizeEmail(identity.Email);
+        // Apple omits the `email` claim on every sign-in AFTER the first authorization. For
+        // returning users we can look them up by `sub` (ProviderAccountId) alone; only new
+        // signups actually need the email to persist a User row.
+        var normalizedEmail = string.IsNullOrWhiteSpace(identity.Email)
+            ? null
+            : NormalizeEmail(identity.Email);
         var nowUtc = DateTime.UtcNow;
         var externalAccount = await authRepository.GetExternalAccountAsync(
             AuthProvider.Apple,
@@ -382,12 +387,24 @@ public sealed class AuthService(
         if (externalAccount is not null)
         {
             user = externalAccount.User;
-            externalAccount.ProviderEmail = normalizedEmail;
+            // Only refresh ProviderEmail when Apple actually sent one — don't clobber the stored
+            // value with null on returning sign-ins where the email claim is omitted.
+            if (normalizedEmail is not null)
+                externalAccount.ProviderEmail = normalizedEmail;
             externalAccount.LastSignInAtUtc = nowUtc;
             RecoverIfPendingDeletion(user);
         }
         else
         {
+            // No linked account for this Apple `sub`. We're either creating a fresh user
+            // (needs an email) or linking to an existing user found by email. Either way we
+            // need `normalizedEmail` here — if Apple didn't send one, we can't proceed.
+            if (normalizedEmail is null)
+                return new SignInWithAppleResult
+                {
+                    InvalidToken = true
+                };
+
             var existingUser = await authRepository.GetUserByEmailAsync(normalizedEmail, cancellationToken);
             isNewUser = existingUser is null;
             if (existingUser is not null)

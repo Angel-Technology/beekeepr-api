@@ -29,13 +29,20 @@ public sealed class AppleTokenVerifier : IAppleTokenVerifier
     {
         this.appleAuthOptions = appleAuthOptions;
         this.logger = logger;
-        // ConfigurationManager caches the OIDC discovery doc + JWKS (default refresh: 24h,
-        // automatic re-fetch on signature failure). This is the same pattern AspNetCore's
-        // JwtBearer handler uses for issuer key rotation.
+        // ConfigurationManager caches the OIDC discovery doc + JWKS. Defaults are
+        // AutomaticRefreshInterval=24h and RefreshInterval=5m. Apple rotates keys more
+        // frequently than 24h in practice — a stale cache produced the
+        // `SecurityTokenSignatureKeyNotFoundException` that locked out the App Store reviewer
+        // on 2026-09-09. Shortening the auto-refresh to 1h narrows that window; a signature
+        // failure below also triggers an explicit RequestRefresh + retry.
         configurationManager = new ConfigurationManager<OpenIdConnectConfiguration>(
             AppleOpenIdConfigurationUrl,
             new OpenIdConnectConfigurationRetriever(),
-            new HttpDocumentRetriever { RequireHttps = true });
+            new HttpDocumentRetriever { RequireHttps = true })
+        {
+            AutomaticRefreshInterval = TimeSpan.FromHours(1),
+            RefreshInterval = TimeSpan.FromMinutes(5)
+        };
     }
 
     public async Task<AppleIdentity?> VerifyIdTokenAsync(string idToken, CancellationToken cancellationToken)
@@ -48,6 +55,45 @@ public sealed class AppleTokenVerifier : IAppleTokenVerifier
             throw new InvalidOperationException(
                 "Apple:ClientIds must contain at least one allowed Apple client ID (iOS bundle ID or Services ID).");
 
+        var validationOutcome = await ValidateWithCurrentKeysAsync(idToken, clientIds, cancellationToken);
+
+        // If Apple rotated signing keys between our last JWKS fetch and this request, the
+        // validator throws SecurityTokenSignatureKeyNotFoundException. Force a JWKS refresh
+        // and retry once before giving up.
+        if (validationOutcome.SignatureKeyMissing)
+        {
+            configurationManager.RequestRefresh();
+            validationOutcome = await ValidateWithCurrentKeysAsync(idToken, clientIds, cancellationToken);
+        }
+
+        if (validationOutcome.Claims is null)
+            return null;
+
+        var result = ExtractClaims(validationOutcome.Claims);
+
+        if (string.IsNullOrWhiteSpace(result.Subject))
+        {
+            logger.LogWarning("Apple identity token missing `sub` claim; rejecting.");
+            return null;
+        }
+
+        var email = string.IsNullOrWhiteSpace(result.Email) ? null : result.Email;
+
+        return new AppleIdentity
+        {
+            ProviderAccountId = result.Subject,
+            Email = email,
+            EmailVerified = email is not null && result.EmailVerified,
+            IsPrivateRelayEmail = email is not null
+                && email.EndsWith($"@{PrivateRelayDomain}", StringComparison.OrdinalIgnoreCase)
+        };
+    }
+
+    private async Task<ValidationOutcome> ValidateWithCurrentKeysAsync(
+        string idToken,
+        string[] clientIds,
+        CancellationToken cancellationToken)
+    {
         OpenIdConnectConfiguration configuration;
         try
         {
@@ -56,7 +102,7 @@ public sealed class AppleTokenVerifier : IAppleTokenVerifier
         catch (Exception exception)
         {
             logger.LogWarning(exception, "Failed to fetch Apple OIDC configuration/JWKS.");
-            return null;
+            return ValidationOutcome.Failed;
         }
 
         var validationParameters = new TokenValidationParameters
@@ -71,40 +117,38 @@ public sealed class AppleTokenVerifier : IAppleTokenVerifier
             ClockSkew = TimeSpan.FromMinutes(5)
         };
 
-        ClaimsValidationResult result;
         try
         {
             var validationResult = await tokenHandler.ValidateTokenAsync(idToken, validationParameters);
             if (!validationResult.IsValid)
             {
                 // The inner exception type (SecurityTokenInvalidAudienceException,
-                // ...ExpiredException, ...) is the only signal worth keeping — it tells us
-                // whether the next failure is a misconfigured bundle ID, an expired token,
-                // or a deeper issue. PII (email, sub) and full tokens stay out of logs.
-                logger.LogWarning(
-                    "Apple identity token rejected: {Reason}.",
-                    validationResult.Exception?.GetType().Name ?? "unknown");
-                return null;
+                // ...ExpiredException, ...SignatureKeyNotFoundException) is the only signal
+                // worth keeping — it tells us whether the next failure is a misconfigured
+                // bundle ID, an expired token, or a rotated key. PII stays out of logs.
+                var reason = validationResult.Exception?.GetType().Name ?? "unknown";
+                logger.LogWarning("Apple identity token rejected: {Reason}.", reason);
+                return new ValidationOutcome
+                {
+                    Claims = null,
+                    SignatureKeyMissing = validationResult.Exception is SecurityTokenSignatureKeyNotFoundException
+                };
             }
 
-            result = ExtractClaims(validationResult.Claims);
+            return new ValidationOutcome { Claims = validationResult.Claims };
         }
         catch (Exception exception)
         {
             logger.LogWarning(exception, "Unexpected error validating Apple identity token.");
-            return null;
+            return ValidationOutcome.Failed;
         }
+    }
 
-        if (string.IsNullOrWhiteSpace(result.Subject) || string.IsNullOrWhiteSpace(result.Email))
-            return null;
-
-        return new AppleIdentity
-        {
-            ProviderAccountId = result.Subject,
-            Email = result.Email,
-            EmailVerified = result.EmailVerified,
-            IsPrivateRelayEmail = result.Email.EndsWith($"@{PrivateRelayDomain}", StringComparison.OrdinalIgnoreCase)
-        };
+    private readonly struct ValidationOutcome
+    {
+        public IDictionary<string, object>? Claims { get; init; }
+        public bool SignatureKeyMissing { get; init; }
+        public static ValidationOutcome Failed => default;
     }
 
     private static ClaimsValidationResult ExtractClaims(IDictionary<string, object> claims)

@@ -253,7 +253,7 @@ public sealed class UserMutations
             return new SignInWithApplePayload
             {
                 Error = "Apple sign-in failed."
-            };
+            }; 
         }
 
         SessionCookieManager.WriteSessionCookie(httpContextEarly, result.SessionToken, result.ExpiresAtUtc.Value);

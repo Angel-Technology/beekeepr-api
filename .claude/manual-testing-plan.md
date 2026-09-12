@@ -1300,13 +1300,11 @@ mutation { updateProfile(input: {
 ```
 **Expect**: all fields returned as set (with `@` stripped from instagram/telegram). The "complete your profile" frontend flow makes this single call.
 
-### 21.9 Welcome email fires after first DisplayName
+### 21.9 Welcome email fires at signup (not at profile completion)
 
-If this is a brand-new email-signed-in user who hasn't received a welcome yet, setting `displayName` via `updateProfile` makes them eligible for the sweeper. On the next sweep pass (≤15 min, or restart the API for an immediate pass) logs show:
-```
-Welcome email sweep delivered 1/1 pending welcomes.
-```
-This verifies the deferred-welcome chain end-to-end.
+As of 2026-09-12 the welcome email is sent inline at User row creation — every signup path (`verifyEmailSignIn`, `signInWithGoogle`, `signInWithApple`, `createUser`) fires once. There is no sweeper and no name-gating.
+
+To verify: sign in a fresh email → `verifyEmailSignIn` → tail Render logs for `ResendWelcomeEmailSender` activity within the request. `updateProfile` does **not** trigger a resend; the guard is `User.WelcomeEmailSentAtUtc IS NULL` in `TrySendWelcomeAsync`. When no name is available, the email renders "Welcome to BuzzKeepr, Newbee."
 
 ---
 
