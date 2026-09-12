@@ -70,9 +70,16 @@ public sealed class UserService(
 
         await userRepository.AddAsync(user, cancellationToken);
 
-        // Welcome email is deferred — we have no DisplayName at signup. The sweeper picks the
-        // user up once they complete their profile (or, for users who go through Persona, when
-        // VerifiedFirstName lands via the webhook).
+        try
+        {
+            await welcomeEmailSender.SendWelcomeAsync(user.Email, user.Profile?.DisplayName, cancellationToken);
+            user.WelcomeEmailSentAtUtc = DateTime.UtcNow;
+            await userRepository.SaveChangesAsync(cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Welcome email failed to send for user {UserId}.", user.Id);
+        }
 
         return new CreateUserResult
         {

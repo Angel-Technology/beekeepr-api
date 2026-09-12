@@ -17,3 +17,5 @@ BuzzKeepr.Presentation/bin\\Debug/
 
 # OS files
 .DS_Store
+.neon
+.env.local

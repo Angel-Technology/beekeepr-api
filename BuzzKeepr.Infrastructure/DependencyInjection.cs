@@ -147,7 +147,6 @@ public static class DependencyInjection
         services.AddScoped<RevenueCatWebhookAuthorizer>();
         services.AddHostedService<Auth.SessionCleanupBackgroundService>();
         services.AddHostedService<Auth.VerificationTokenCleanupBackgroundService>();
-        services.AddHostedService<Auth.WelcomeEmailSweeperBackgroundService>();
         services.AddHostedService<IdentityVerification.BackgroundCheckRenewalBackgroundService>();
         services.AddHostedService<Users.AccountDeletionPurgeBackgroundService>();
 
@@ -169,7 +168,11 @@ public static class DependencyInjection
         if (!trimmed.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase)
             && !trimmed.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
         {
-            return raw;
+            // Already keyword=value form — still apply cold-start friendly timeouts if the
+            // operator hasn't set them explicitly.
+            var keywordBuilder = new NpgsqlConnectionStringBuilder(trimmed);
+            ApplyNeonColdStartDefaults(keywordBuilder);
+            return keywordBuilder.ConnectionString;
         }
 
         var uri = new Uri(trimmed);
@@ -199,6 +202,18 @@ public static class DependencyInjection
             try { builder[key] = value; } catch { /* unknown keyword — ignore */ }
         }
 
+        ApplyNeonColdStartDefaults(builder);
         return builder.ConnectionString;
+    }
+
+    private static void ApplyNeonColdStartDefaults(NpgsqlConnectionStringBuilder builder)
+    {
+        // Npgsql defaults: Timeout=15s (connect), CommandTimeout=30s. Neon compute cold starts
+        // + pooler routing can push connect past 15s under load. Only widen when the operator
+        // hasn't explicitly opted into a value.
+        if (!builder.ContainsKey("Timeout"))
+            builder.Timeout = 30;
+        if (!builder.ContainsKey("Command Timeout"))
+            builder.CommandTimeout = 60;
     }
 }

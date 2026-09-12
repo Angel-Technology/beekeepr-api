@@ -53,10 +53,10 @@ public sealed class ResendWelcomeEmailSender(
     private static string ExtractFirstName(string? displayName)
     {
         if (string.IsNullOrWhiteSpace(displayName))
-            return "there";
+            return "Newbee";
 
         var first = displayName.Trim().Split(' ', 2, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
             .FirstOrDefault();
-        return string.IsNullOrEmpty(first) ? "there" : first;
+        return string.IsNullOrEmpty(first) ? "Newbee" : first;
     }
 }

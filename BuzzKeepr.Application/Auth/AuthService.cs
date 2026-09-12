@@ -232,10 +232,7 @@ public sealed class AuthService(
         await authRepository.AddSessionAsync(session, cancellationToken);
         await authRepository.SaveChangesAsync(cancellationToken);
 
-        // Email sign-in users have no display name yet — sending a welcome here would render
-        // "Welcome to BuzzKeepr, there." Defer until we have a name (Persona webhook will
-        // trigger the welcome with verifiedFirstName when verification approves).
-        if (isNewUser && !string.IsNullOrWhiteSpace(user.Profile?.DisplayName))
+        if (isNewUser)
             await TrySendWelcomeAsync(user, cancellationToken);
 
         return new VerifyEmailSignInResult
@@ -336,8 +333,8 @@ public sealed class AuthService(
         await authRepository.AddSessionAsync(session, cancellationToken);
         await authRepository.SaveChangesAsync(cancellationToken);
 
-        // No inline welcome — DisplayName isn't captured at Google sign-in anymore. The sweeper
-        // sends the welcome once the user completes their profile.
+        if (isNewUser)
+            await TrySendWelcomeAsync(user, cancellationToken);
 
         return new SignInWithGoogleResult
         {
@@ -440,8 +437,8 @@ public sealed class AuthService(
         await authRepository.AddSessionAsync(session, cancellationToken);
         await authRepository.SaveChangesAsync(cancellationToken);
 
-        // No inline welcome — DisplayName isn't captured at Apple sign-in anymore. The sweeper
-        // sends the welcome once the user completes their profile.
+        if (isNewUser)
+            await TrySendWelcomeAsync(user, cancellationToken);
 
         return new SignInWithAppleResult
         {
