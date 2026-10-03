@@ -1,8 +1,10 @@
 using System.Text.Json;
+using BuzzKeepr.Application.Auth;
 using BuzzKeepr.Application.IdentityVerification.Models;
 using BuzzKeepr.Domain.Entities;
 using BuzzKeepr.Domain.Enums;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace BuzzKeepr.Application.IdentityVerification;
 
@@ -10,8 +12,12 @@ public sealed class IdentityVerificationService(
     IIdentityVerificationRepository identityVerificationRepository,
     IPersonaClient personaClient,
     ICheckrTrustClient checkrTrustClient,
+    IOptions<AuthOptions> authOptions,
     ILogger<IdentityVerificationService> logger) : IIdentityVerificationService
 {
+ 
+    private readonly HashSet<string> reviewAccountEmails = BuildReviewAccountEmailSet(authOptions.Value.ReviewAccounts);
+
     private static readonly HashSet<IdentityVerificationStatus> RetryableStatuses =
     [
         IdentityVerificationStatus.Declined,
@@ -48,6 +54,11 @@ public sealed class IdentityVerificationService(
             {
                 Error = "Authenticated user was not found."
             };
+        }
+
+        if (IsReviewAccount(user.Email))
+        {
+            return await ApproveReviewAccountPersonaAsync(user, cancellationToken);
         }
 
         var iv = user.IdentityVerification;
@@ -291,6 +302,11 @@ public sealed class IdentityVerificationService(
             };
         }
 
+        if (IsReviewAccount(user.Email))
+        {
+            return await ApproveReviewAccountCheckrAsync(user, input, cancellationToken);
+        }
+
         var bc = user.BackgroundCheck;
         var iv = user.IdentityVerification;
         var hasExistingProfile = !string.IsNullOrWhiteSpace(bc?.CheckrProfileId);
@@ -525,6 +541,98 @@ public sealed class IdentityVerificationService(
             "failed" => PersonaInquiryStatus.Failed,
             "expired" => PersonaInquiryStatus.Expired,
             _ => PersonaInquiryStatus.Pending
+        };
+    }
+
+    private bool IsReviewAccount(string? email)
+    {
+        if (string.IsNullOrWhiteSpace(email) || reviewAccountEmails.Count == 0)
+            return false;
+        return reviewAccountEmails.Contains(email.Trim().ToLowerInvariant());
+    }
+
+    private static HashSet<string> BuildReviewAccountEmailSet(IReadOnlyList<ReviewAccount>? raw)
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        if (raw is null)
+            return set;
+        foreach (var account in raw)
+        {
+            if (string.IsNullOrWhiteSpace(account.Email) || string.IsNullOrWhiteSpace(account.Pin))
+                continue;
+            set.Add(account.Email.Trim().ToLowerInvariant());
+        }
+        return set;
+    }
+
+    private async Task<StartPersonaInquiryResult> ApproveReviewAccountPersonaAsync(
+        User user,
+        CancellationToken cancellationToken)
+    {
+        var iv = user.EnsureIdentityVerification();
+
+        // Idempotent: if the reviewer already got the synthetic approval, return it as-is
+        // instead of re-stamping PersonaVerifiedAtUtc every call.
+        if (iv.Status != IdentityVerificationStatus.Approved)
+        {
+            iv.PersonaInquiryId ??= $"inq_review_{Guid.NewGuid():N}";
+            iv.PersonaInquiryStatus = PersonaInquiryStatus.Approved;
+            iv.Status = IdentityVerificationStatus.Approved;
+            iv.PersonaInquiryUpdatedAtUtc = DateTime.UtcNow;
+            iv.PersonaVerifiedAtUtc = DateTime.UtcNow;
+            iv.VerifiedFirstName ??= "Review";
+            iv.VerifiedLastName ??= "Account";
+            iv.VerifiedBirthdate ??= "1990-01-01";
+            iv.VerifiedLicenseState ??= "CA";
+
+            await identityVerificationRepository.SaveChangesAsync(cancellationToken);
+
+            logger.LogInformation(
+                "Short-circuited Persona inquiry to Approved for review account user {UserId}.",
+                user.Id);
+        }
+
+        // No SessionToken on purpose — frontend reads this as "no SDK launch needed."
+        return new StartPersonaInquiryResult
+        {
+            Success = true,
+            CreatedNewInquiry = false,
+            InquiryId = iv.PersonaInquiryId,
+            IdentityVerificationStatus = iv.Status,
+            PersonaInquiryStatus = iv.PersonaInquiryStatus
+        };
+    }
+
+    private async Task<CreateInstantCriminalCheckResult> ApproveReviewAccountCheckrAsync(
+        User user,
+        StartInstantCriminalCheckInput input,
+        CancellationToken cancellationToken)
+    {
+        var persistedBc = user.EnsureBackgroundCheck();
+        persistedBc.CheckrProfileId ??= $"prf_review_{Guid.NewGuid():N}";
+        persistedBc.CheckrLastCheckId = $"chk_review_{Guid.NewGuid():N}";
+        persistedBc.CheckrLastCheckAtUtc = DateTime.UtcNow;
+        persistedBc.CheckrLastCheckHasPossibleMatches = false;
+        persistedBc.Badge = BackgroundCheckBadge.Approved;
+        persistedBc.BadgeExpiresAtUtc = DateTime.UtcNow.AddMonths(BackgroundCheckBadgeValidMonths);
+
+        var trimmedPhone = string.IsNullOrWhiteSpace(input.PhoneNumber) ? null : input.PhoneNumber.Trim();
+        if (!string.IsNullOrWhiteSpace(trimmedPhone))
+            user.EnsureProfile().PhoneNumber = trimmedPhone;
+
+        await identityVerificationRepository.SaveChangesAsync(cancellationToken);
+
+        logger.LogInformation(
+            "Short-circuited Checkr instant criminal check to Approved for review account user {UserId}.",
+            user.Id);
+
+        return new CreateInstantCriminalCheckResult
+        {
+            Success = true,
+            CheckId = persistedBc.CheckrLastCheckId,
+            ProfileId = persistedBc.CheckrProfileId,
+            ResultCount = 0,
+            HasPossibleMatches = false
         };
     }
 
